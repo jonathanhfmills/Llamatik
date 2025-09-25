@@ -11,4 +11,22 @@ expect object LlamaBridge {
     fun embed(input: String): FloatArray
     fun initGenerateModel(modelPath: String): Boolean
     fun generate(prompt: String): String
+    fun generateWithContext(systemPrompt: String, contextBlock: String, userPrompt: String): String
+    fun generateStream(prompt: String, callback: GenStream)
+    fun generateStreamWithContext(systemPrompt: String, contextBlock: String, userPrompt: String, callback: GenStream)
+    fun generateWithContextStream(
+        system: String,
+        context: String,
+        user: String,
+        onDelta: (String) -> Unit,
+        onDone: () -> Unit,
+        onError: (String) -> Unit
+    )
+    fun shutdown()
+}
+
+interface GenStream {
+    fun onDelta(text: String)
+    fun onComplete()
+    fun onError(message: String)
 }

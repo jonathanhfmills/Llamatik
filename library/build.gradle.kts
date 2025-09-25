@@ -100,7 +100,9 @@ kotlin {
                     "-DCMAKE_BUILD_TYPE=Release",
                     "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
                     "-DGGML_OPENMP=OFF",
-                    "-DLLAMA_CURL=OFF"
+                    "-DLLAMA_CURL=OFF",
+                    if (sdk == "iphonesimulator") "-DLLAMA_BUILD_BERT=ON" else "-DLLAMA_BUILD_BERT=OFF",
+                    if (sdk == "iphonesimulator") "-DLLAMA_BUILD_EMBEDDERS=ON" else "-DLLAMA_BUILD_EMBEDDERS=OFF",
                 )
             }
         }
@@ -179,6 +181,8 @@ kotlin {
                 implementation(libs.kotlin.stdlib)
                 implementation(compose.ui)
                 implementation(compose.foundation)
+                implementation(compose.components.resources)
+                resources.srcDir("src/commonMain/resources")
             }
         }
         val commonTest by getting {
@@ -190,6 +194,10 @@ kotlin {
     }
 }
 
+compose.resources {
+    publicResClass = true
+}
+
 android {
     namespace = "com.llamatik.library"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
@@ -197,11 +205,17 @@ android {
         minSdk = libs.versions.android.minSdk.get().toInt()
         ndk {
             abiFilters.add("arm64-v8a")
+            abiFilters.add("x86_64")
         }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
+    }
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
     kotlin {
         jvmToolchain(21)

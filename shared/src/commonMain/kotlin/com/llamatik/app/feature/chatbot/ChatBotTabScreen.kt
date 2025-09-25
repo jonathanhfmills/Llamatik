@@ -63,7 +63,7 @@ class ChatBotTabScreen : Screen {
         val navigator = LocalNavigator.currentOrThrow
         val localization = getCurrentLocalization()
         val embedFilePath = getModelPath(modelFileName = "nomic_embed_text_v1_5_Q4_0.gguf")
-        val generatorFilePath = getModelPath(modelFileName = "phi-1_5.Q2_K.gguf")
+        val generatorFilePath = getModelPath(modelFileName = "gemma_3_270m_Q8_0.gguf")
         val isLoading = remember { mutableStateOf(false) }
 
         val viewModel = koinScreenModel<ChatBotViewModel>(
@@ -74,7 +74,9 @@ class ChatBotTabScreen : Screen {
 
         DisposableEffect(key) {
             viewModel.onStarted(embedFilePath, generatorFilePath)
-            onDispose {}
+            onDispose {
+                viewModel.onDispose()
+            }
         }
 
         val state by viewModel.state.collectAsState()
@@ -114,12 +116,13 @@ class ChatBotTabScreen : Screen {
                 ChatBotSideEffects.OnMessageLoaded -> {
                     isLoading.value = false
                 }
-
                 ChatBotSideEffects.OnMessageLoading -> {
                     isLoading.value = true
                 }
-
-                ChatBotSideEffects.OnNoResults -> {}
+                ChatBotSideEffects.OnNoResults -> {
+                    isLoading.value = false
+                }
+                ChatBotSideEffects.ScrollToBottom -> {}
             }
         }
     }
@@ -226,9 +229,7 @@ class ChatBotTabScreen : Screen {
                         modifier = Modifier.padding(horizontal = 16.dp),
                         text = "Here are some hints:\n" +
                                 "\n" +
-                                "How can I start Viggen?\n" +
-                                "Describe the F-18 system weapons.\n" +
-                                "Can I use Mavericks on the F-16?\n" +
+                                "---\n" +
                                 "\n",
                         style = MaterialTheme.typography.bodyMedium,
                         textAlign = TextAlign.Center,
