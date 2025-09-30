@@ -35,9 +35,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester.Companion.FocusRequesterFactory.component1
-import androidx.compose.ui.focus.FocusRequester.Companion.FocusRequesterFactory.component2
-import androidx.compose.ui.focus.FocusRequester.Companion.createRefs
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -72,7 +69,7 @@ class ChatBotTabScreen : Screen {
 
         val isDialogOpen = remember { mutableStateOf(false) }
 
-        DisposableEffect(key) {
+        DisposableEffect(Unit) {
             viewModel.onStarted(embedFilePath, generatorFilePath)
             onDispose {
                 viewModel.onDispose()
@@ -203,7 +200,6 @@ class ChatBotTabScreen : Screen {
         chatUiModel: ChatUiModel,
         isLoading: MutableState<Boolean>
     ) {
-        val (messages, chatBox) = createRefs()
         val listState = rememberLazyListState()
         LaunchedEffect(chatUiModel.messages.size) {
             listState.animateScrollToItem(chatUiModel.messages.size)
@@ -227,10 +223,7 @@ class ChatBotTabScreen : Screen {
                     )
                     Text(
                         modifier = Modifier.padding(horizontal = 16.dp),
-                        text = "Here are some hints:\n" +
-                                "\n" +
-                                "---\n" +
-                                "\n",
+                        text = "Here are some hints:\n\n---\n\n",
                         style = MaterialTheme.typography.bodyMedium,
                         textAlign = TextAlign.Center,
                         color = MaterialTheme.colorScheme.outline
@@ -279,7 +272,12 @@ class ChatBotTabScreen : Screen {
                             bottomEnd = if (message.isFromMe) 0f else 48f
                         )
                     )
-                    .background(if (message.isFromMe) MaterialTheme.colorScheme.inversePrimary else MaterialTheme.colorScheme.surfaceContainer)
+                    .background(
+                        if (message.isFromMe)
+                            MaterialTheme.colorScheme.inversePrimary
+                        else
+                            MaterialTheme.colorScheme.surfaceContainer
+                    )
                     .padding(16.dp)
             ) {
                 Text(text = message.text)
