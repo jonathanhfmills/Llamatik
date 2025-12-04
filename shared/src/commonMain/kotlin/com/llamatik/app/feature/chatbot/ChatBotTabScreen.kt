@@ -25,6 +25,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -80,7 +81,6 @@ import com.llamatik.app.ui.theme.Typography
 import org.jetbrains.compose.resources.painterResource
 import org.koin.core.parameter.ParametersHolder
 
-
 class ChatBotTabScreen : Screen {
     @Composable
     override fun Content() {
@@ -110,6 +110,7 @@ class ChatBotTabScreen : Screen {
 
         val state by viewModel.state.collectAsState()
         val conversation = viewModel.conversation.collectAsState()
+
         SetupSideEffects(
             viewModel = viewModel,
             isLoading = isLoading,
@@ -118,17 +119,62 @@ class ChatBotTabScreen : Screen {
             loadingEmbedModelName = loadingEmbedModelName,
             loadingGenerateModelName = loadingGenerateModelName,
         )
+
         LlamatikTheme {
-            ChatBotScreenView(
-                viewModel,
-                localization,
-                conversation.value,
-                isLoading,
-                state,
-                showSuggestions,
-                showSettingsSheet,
-                showModelSelectorSheet
-            )
+            Box(modifier = Modifier.fillMaxSize()) {
+                ChatBotScreenView(
+                    viewModel,
+                    localization,
+                    conversation.value,
+                    isLoading,
+                    state,
+                    showSuggestions,
+                    showSettingsSheet,
+                    showModelSelectorSheet
+                )
+
+                // --------- Initial setup overlay (auto model download) ----------
+                if (state.isInitialSetup) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .padding(24.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .padding(horizontal = 24.dp, vertical = 32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(48.dp),
+                            )
+                            Text(
+                                text = "Setting up Llamatik…",
+                                style = Typography.get().titleMedium
+                            )
+                            val modelName = state.initialSetupModelName ?: "AI model"
+                            Text(
+                                text = "Downloading $modelName for the first time.\nThis may take a few minutes.",
+                                style = Typography.get().bodyMedium
+                            )
+                            if (state.initialSetupProgress > 0) {
+                                Text(
+                                    text = "Progress: ${state.initialSetupProgress.coerceIn(0, 100)}%",
+                                    style = Typography.get().labelMedium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+                }
+                // ----------------------------------------------------------------
+            }
+
             if (showSettingsSheet.value) {
                 ModelSettingsBottomSheet {
                     showSettingsSheet.value = false
@@ -142,7 +188,7 @@ class ChatBotTabScreen : Screen {
                     selectedGenerateModelName = state.selectedGenerateModelName,
                     embedModels = state.embedModels,
                     generateModels = state.generateModels,
-                    loadingEmbedModelName = loadingEmbedModelName.value,          // NEW
+                    loadingEmbedModelName = loadingEmbedModelName.value,
                     loadingGenerateModelName = loadingGenerateModelName.value,
                     onEmbedModelSelectedClicked = { model ->
                         loadingEmbedModelName.value = model.name
@@ -154,7 +200,13 @@ class ChatBotTabScreen : Screen {
                     },
                     onDownloadModelClicked = { model ->
                         viewModel.onDownloadModel(model)
-                    }
+                    },
+                    onDeleteModelClicked = { model ->
+                        viewModel.onDeleteModel(model)
+                    },
+                    onCancelDownloadClicked = { model ->
+                        viewModel.onCancelDownload(model)
+                    },
                 ) {
                     showModelSelectorSheet.value = false
                 }
@@ -231,7 +283,6 @@ class ChatBotTabScreen : Screen {
         showModelSelectorSheet: MutableState<Boolean>,
     ) {
         BoxWithConstraints(Modifier.fillMaxSize(), propagateMinConstraints = true) {
-
             Scaffold(
                 topBar = {
                     TopAppBar(
@@ -286,7 +337,9 @@ class ChatBotTabScreen : Screen {
                         .background(MaterialTheme.colorScheme.background)
                 ) {
                     Spacer(
-                        modifier = Modifier.fillMaxWidth().height(1.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
                             .background(MaterialTheme.colorScheme.surfaceDim)
                     )
 
@@ -323,7 +376,9 @@ class ChatBotTabScreen : Screen {
 
         Box {
             Image(
-                modifier = Modifier.fillMaxWidth().height(140.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(140.dp)
                     .onGloballyPositioned {
                         sizeImage = it.size
                     },
@@ -349,7 +404,7 @@ class ChatBotTabScreen : Screen {
         val listState = rememberLazyListState()
         LaunchedEffect(chatUiModel.messages.size) {
             if (chatUiModel.messages.isNotEmpty()) {
-                listState.animateScrollToItem(chatUiModel.messages.size -1)
+                listState.animateScrollToItem(chatUiModel.messages.size - 1)
             }
         }
 
@@ -358,7 +413,9 @@ class ChatBotTabScreen : Screen {
         ) {
             if (chatUiModel.messages.isEmpty()) {
                 Column(
-                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
                     verticalArrangement = Arrangement.Top,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
@@ -368,7 +425,9 @@ class ChatBotTabScreen : Screen {
             } else {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxWidth().weight(1f)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
                 ) {
                     items(chatUiModel.messages.size) { item ->
                         ChatItem(
@@ -429,7 +488,8 @@ class ChatBotTabScreen : Screen {
                     modifier = Modifier.align(Alignment.CenterVertically),
                     text = if (message.isFromMe) "\uD83D\uDEE9 Me" else "\uD83D\uDC68\uD83C\uDFFB\u200D✈\uFE0F Llamatik AI",
                     style = Typography.get().titleSmall,
-                    color = if (message.isFromMe) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                    color = if (message.isFromMe) MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onSurface,
                 )
                 if (showLoading) {
                     Spacer(modifier = Modifier.size(8.dp))
@@ -513,6 +573,7 @@ fun ChatInputBox(
             mutableStateOf(TextFieldValue())
         }
 
+        val isGenerating = state.isGenerating
         Column(
             horizontalAlignment = Alignment.Start,
         ) {
@@ -582,7 +643,15 @@ fun ChatInputBox(
                         capitalization = KeyboardCapitalization.Sentences
                     ),
                     keyboardActions = KeyboardActions(
-                        onSend = { keyboardController?.hide() },
+                        onSend = {
+                            if (!isGenerating && canSend) {
+                                val message = input.text.trim()
+                                input = TextFieldValue()
+                                viewModel.onMessageSendDirect(message)
+                                showSuggestions.value = false
+                                keyboardController?.hide()
+                            }
+                        },
                     ),
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
@@ -592,32 +661,51 @@ fun ChatInputBox(
                         unfocusedIndicatorColor = Color.Transparent
                     ),
                     trailingIcon = {
-                        IconButton(
-                            onClick = {
-                                if (canSend) {
-                                    val message = input.text.trim()
-                                    input = TextFieldValue()
-                                    viewModel.onMessageSendDirect(message)
-                                    showSuggestions.value = false
-                                    keyboardController?.hide()
-                                }
-                            },
-                            enabled = canSend,
-                            modifier = Modifier
-                                .padding(end = 8.dp)
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(
-                                    if (canSend) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.surfaceVariant
+                        if (isGenerating) {
+                            IconButton(
+                                onClick = {
+                                    viewModel.stopGeneration()
+                                },
+                                modifier = Modifier
+                                    .padding(end = 8.dp)
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(MaterialTheme.colorScheme.errorContainer)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Stop,
+                                    contentDescription = "Stop",
+                                    tint = MaterialTheme.colorScheme.onErrorContainer
                                 )
-                        ) {
-                            Icon(
-                                imageVector = LlamatikIcons.Send,
-                                contentDescription = "Send",
-                                tint = if (canSend) MaterialTheme.colorScheme.onPrimary
-                                else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            }
+                        } else {
+                            IconButton(
+                                onClick = {
+                                    if (canSend) {
+                                        val message = input.text.trim()
+                                        input = TextFieldValue()
+                                        viewModel.onMessageSendDirect(message)
+                                        showSuggestions.value = false
+                                        keyboardController?.hide()
+                                    }
+                                },
+                                enabled = canSend,
+                                modifier = Modifier
+                                    .padding(end = 8.dp)
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(
+                                        if (canSend) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.surfaceVariant
+                                    )
+                            ) {
+                                Icon(
+                                    imageVector = LlamatikIcons.Send,
+                                    contentDescription = "Send",
+                                    tint = if (canSend) MaterialTheme.colorScheme.onPrimary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     },
                 )
@@ -675,21 +763,6 @@ fun GenerateModelSelector(
                         )
                     }
                 }
-/*
-                Spacer(modifier = Modifier.size(8.dp))
-
-                IconButton(
-                    onClick = onOpenSettings,
-                    modifier = Modifier.size(24.dp),
-                    content = {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = null,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                )
- */
             }
         }
     }

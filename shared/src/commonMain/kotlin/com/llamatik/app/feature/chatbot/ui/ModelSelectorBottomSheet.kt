@@ -22,6 +22,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -47,6 +48,8 @@ fun ModelSelectorBottomSheet(
     onEmbedModelSelectedClicked: (LlamaModel) -> Unit,
     onGenerateModelSelectedClicked: (LlamaModel) -> Unit,
     onDownloadModelClicked: (LlamaModel) -> Unit,
+    onDeleteModelClicked: (LlamaModel) -> Unit,
+    onCancelDownloadClicked: (LlamaModel) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -77,7 +80,9 @@ fun ModelSelectorBottomSheet(
                     progress = progressMap[model.url] ?: 0f,
                     isSelecting = (model.name == loadingGenerateModelName),
                     onModelSelectedClicked = onGenerateModelSelectedClicked,
-                    onDownloadModelClicked = onDownloadModelClicked
+                    onDownloadModelClicked = onDownloadModelClicked,
+                    onDeleteModelClicked = onDeleteModelClicked,
+                    onCancelDownloadClicked = onCancelDownloadClicked,
                 )
                 Spacer(Modifier.height(12.dp))
             }
@@ -115,6 +120,8 @@ private fun ModelRow(
     isSelecting: Boolean,
     onModelSelectedClicked: (LlamaModel) -> Unit,
     onDownloadModelClicked: (LlamaModel) -> Unit,
+    onDeleteModelClicked: (LlamaModel) -> Unit,
+    onCancelDownloadClicked: (LlamaModel) -> Unit,
 ) {
     val hasLocalFile = !model.localPath.isNullOrEmpty() || !model.fileName.isNullOrEmpty()
     var localDownloading by remember(model.url, isDownloading) { mutableStateOf(isDownloading) }
@@ -142,28 +149,46 @@ private fun ModelRow(
                         Text("Current")
                     }
                 } else {
-                    FilledTonalButton(
-                        onClick = { if (!isSelecting) onModelSelectedClicked(model) },
-                        enabled = !isSelecting
-                    ) {
-                        if (isSelecting) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text("Loading…")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilledTonalButton(
+                            onClick = { if (!isSelecting) onModelSelectedClicked(model) },
+                            enabled = !isSelecting
+                        ) {
+                            if (isSelecting) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Loading…")
+                                }
+                            } else {
+                                Text("Select")
                             }
-                        } else {
-                            Text("Select")
+                        }
+                        FilledTonalButton(
+                            onClick = { onDeleteModelClicked(model) },
+                            enabled = !isSelecting
+                        ) {
+                            Text("Delete")
                         }
                     }
                 }
             } else {
                 if (effectiveDownloading) {
                     Column(horizontalAlignment = Alignment.End) {
-                        Text("Downloading…", style = Typography.get().labelSmall)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("Downloading…", style = Typography.get().labelSmall)
+                            TextButton(
+                                onClick = { onCancelDownloadClicked(model) }
+                            ) {
+                                Text("Stop")
+                            }
+                        }
                         Spacer(Modifier.height(6.dp))
                         LinearProgressIndicator(
                             progress = { progress },

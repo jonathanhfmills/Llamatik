@@ -18,17 +18,20 @@ import com.llamatik.app.feature.news.NewsFeedScreen
 import com.llamatik.app.feature.news.repositories.FeedItem
 import com.llamatik.app.feature.news.usecases.GetAllNewsUseCase
 import com.llamatik.app.localization.getCurrentLocalization
+import com.llamatik.app.platform.LlamatikTempFile
 import com.llamatik.library.platform.GenStream
 import com.llamatik.library.platform.LlamaBridge
 import com.russhwolf.settings.Settings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.TimeZone
@@ -81,16 +84,22 @@ class ChatBotViewModel(
     private val _conversation = MutableStateFlow(emptyList<ChatUiModel.Message>())
     val conversation: StateFlow<List<ChatUiModel.Message>> get() = _conversation
 
-    /** Guard to ignore late callbacks when a new request starts */
+    /** Guard to ignore late callbacks when a new request starts or is stopped */
     @Volatile
     private var activeRequestId: String? = null
 
     @Volatile
     private var started = false
 
+    private val downloadJobs = mutableMapOf<String, Job>()
+
+    /** Whether the user has already accepted the privacy/onboarding */
+    private var hasAcceptedPrivacy: Boolean =
+        settings.getBoolean(PRIVACY_CHATBOT_VIEWED_KEY, false)
+
     init {
-        val isPrivacyMessageDisplayed = settings.getBoolean(PRIVACY_CHATBOT_VIEWED_KEY, false)
-        if (isPrivacyMessageDisplayed) {
+        // If privacy not accepted yet → show onboarding first.
+        if (!hasAcceptedPrivacy) {
             navigator.push(ChatBotOnboardingScreen { onPrivacyAccepted() })
         }
     }
@@ -109,7 +118,11 @@ class ChatBotViewModel(
         }
     }
 
-    fun onStarted(navigator: Navigator? = null, embedFilePath: String? = null, generatorFilePath: String? = null) {
+    fun onStarted(
+        navigator: Navigator? = null,
+        embedFilePath: String? = null,
+        generatorFilePath: String? = null
+    ) {
         navigator?.let {
             this.navigator = it
         }
@@ -125,6 +138,7 @@ class ChatBotViewModel(
                 LlamaBridge.initGenerateModel(generatorFilePath)
                 _state.value = _state.value.copy(isGenerateModelLoaded = true)
             }
+
             getAllNewsUseCase.invoke()
                 .onSuccess {
                     _state.value = _state.value.copy(latestNews = it)
@@ -132,6 +146,7 @@ class ChatBotViewModel(
                 .onFailure { error ->
                     Logger.e(error.message ?: "Unknown error")
                 }
+
             getModelsUseCase.getDefaultEmbedModels()
                 .onSuccess {
                     _state.value = _state.value.copy(embedModels = it)
@@ -139,33 +154,157 @@ class ChatBotViewModel(
                 .onFailure { error ->
                     Logger.e(error.message ?: "Unknown error")
                 }
+
             getModelsUseCase.getDefaultGenerateModels()
-                .onSuccess {
-                    for (model in it) {
-                        model.localPath?.let {
+                .onSuccess { models ->
+                    // Try to init any already-downloaded generate models
+                    for (model in models) {
+                        model.localPath?.let { path ->
                             Logger.d("LlamaVM - Init Generate Model: ${model.name}")
-                            val isLoaded = LlamaBridge.initGenerateModel(model.localPath)
+                            val isLoaded = LlamaBridge.initGenerateModel(path)
                             if (isLoaded) {
-                                _state.value = _state.value.copy(selectedGenerateModelName = model.name)
+                                _state.value =
+                                    _state.value.copy(
+                                        selectedGenerateModelName = model.name,
+                                        isGenerateModelLoaded = true
+                                    )
                                 _sideEffects.trySend(ChatBotSideEffects.OnGenerateModelLoaded)
+                                break
                             } else {
                                 _sideEffects.trySend(ChatBotSideEffects.OnGenerateModelLoadError)
                             }
                         }
                     }
-                    _state.value = _state.value.copy(generateModels = it)
+                    _state.value = _state.value.copy(generateModels = models)
+
+                    if (hasAcceptedPrivacy) {
+                        startInitialSetupIfNeeded(models)
+                    }
                 }
                 .onFailure { error ->
                     Logger.e(error.message ?: "Unknown error")
                 }
+
             _state.value = _state.value.copy(
                 greeting = getGreeting(),
                 header = getCurrentLocalization().welcome,
                 latestNews = _state.value.latestNews,
             )
+
             vectorStore = loadVectorStoreEntries()
         }
         _sideEffects.trySend(ChatBotSideEffects.OnLoaded)
+    }
+
+    /**
+     * Check if we already have at least one generate model locally.
+     * If not, automatically download and initialize the default model.
+     * We prefer Gemma 3 by name if available.
+     */
+    private suspend fun startInitialSetupIfNeeded(models: List<LlamaModel>) {
+        if (models.isEmpty()) return
+
+        // Do we already have a local path for any generate model?
+        val hasLocal = models.any { model ->
+            val fromState = model.localPath
+            val fromStorage = getModelsUseCase.getSavedModelPath(model.name)
+                .takeIf { it.isNotEmpty() }
+            !fromState.isNullOrEmpty() || !fromStorage.isNullOrEmpty()
+        }
+        if (hasLocal) {
+            return
+        }
+
+        // ---- Prefer Gemma 3 model by default ----
+        val defaultModel = models.firstOrNull {
+            it.name.contains("gemma 3", ignoreCase = true) ||
+                    it.name.contains("gemma3", ignoreCase = true)
+        } ?: models.first()
+
+        val url = defaultModel.url
+        Logger.d("LlamaVM - initial setup: downloading default generate model ${defaultModel.name}")
+
+        _state.value = _state.value.copy(
+            isInitialSetup = true,
+            initialSetupModelName = defaultModel.name,
+            initialSetupProgress = 0
+        )
+
+        updateDownload(url) {
+            it.copy(
+                inProgress = true,
+                progress = 0,
+                done = false,
+                error = null
+            )
+        }
+
+        getModelsUseCase.downloadModel(url) { bytes, totalBytes ->
+            val progress = if (totalBytes > 0) {
+                ((bytes.toFloat() / totalBytes.toFloat()) * 100f).toInt()
+            } else 0
+
+            updateDownload(url) {
+                it.copy(
+                    inProgress = true,
+                    progress = progress
+                )
+            }
+            _state.value = _state.value.copy(initialSetupProgress = progress)
+        }.onSuccess { tempFile ->
+            Logger.d("LlamaVM - initial setup download finished for ${defaultModel.name}")
+            val path = tempFile.absolutePath()
+
+            getModelsUseCase.saveModelPath(defaultModel.name, path)
+
+            _state.value = _state.value.copy(
+                generateModels = _state.value.generateModels.map {
+                    if (it.url == url) it.copy(
+                        fileName = path,
+                        localPath = path
+                    ) else it
+                }
+            )
+
+            val loaded = LlamaBridge.initGenerateModel(path)
+            if (loaded) {
+                _state.value = _state.value.copy(
+                    selectedGenerateModelName = defaultModel.name,
+                    isGenerateModelLoaded = true,
+                    isInitialSetup = false,
+                    initialSetupProgress = 100
+                )
+                _sideEffects.trySend(ChatBotSideEffects.OnGenerateModelLoaded)
+            } else {
+                _state.value = _state.value.copy(
+                    isInitialSetup = false
+                )
+                _sideEffects.trySend(ChatBotSideEffects.OnGenerateModelLoadError)
+            }
+
+            updateDownload(url) {
+                it.copy(
+                    inProgress = false,
+                    progress = 100,
+                    done = true,
+                    error = null
+                )
+            }
+        }.onFailure { error ->
+            Logger.e(error.message ?: "Unknown error") {
+                "LlamaVM - initial setup download failed for ${defaultModel.name}"
+            }
+            _state.value = _state.value.copy(
+                isInitialSetup = false
+            )
+            updateDownload(url) {
+                it.copy(
+                    inProgress = false,
+                    error = error.message,
+                    done = false
+                )
+            }
+        }
     }
 
     fun onEmbedModelSelected(model: LlamaModel) {
@@ -215,9 +354,14 @@ class ChatBotViewModel(
     }
 
     fun onDownloadModel(model: LlamaModel) {
-        screenModelScope.launch(Dispatchers.IO) {
+        val url = model.url
+
+        val existingJob = downloadJobs[url]
+        if (existingJob?.isActive == true) return
+
+        val job = screenModelScope.launch(Dispatchers.IO) {
             try {
-                updateDownload(model.url) {
+                updateDownload(url) {
                     it.copy(
                         inProgress = true,
                         progress = 0,
@@ -225,68 +369,133 @@ class ChatBotViewModel(
                         error = null
                     )
                 }
-                getModelsUseCase.downloadModel(model) { pct ->
-                    updateDownload(model.url) { ds ->
-                        ds.copy(
+
+                getModelsUseCase.downloadModel(url) { bytes, totalBytes ->
+                    updateDownload(url) {
+                        it.copy(
                             inProgress = true,
-                            progress = pct.coerceIn(0, 100)
+                            progress = ((bytes.toFloat() / totalBytes.toFloat()) * 100f).toInt()
                         )
                     }
                 }.onSuccess { tempFile ->
                     Logger.d("LlamaVM - download finished")
-                    updateDownload(model.url) {
+                    updateDownload(url) {
                         it.copy(
                             inProgress = false,
                             progress = 100,
-                            done = true
+                            done = true,
+                            error = null
                         )
                     }
                     getModelsUseCase.saveModelPath(model.name, tempFile.absolutePath())
                     _state.value = _state.value.copy(
                         embedModels = _state.value.embedModels.map {
-                            if (it.url == model.url) it.copy(
+                            if (it.url == url) it.copy(
                                 fileName = tempFile.absolutePath(),
                                 localPath = tempFile.absolutePath()
                             ) else it
                         },
                         generateModels = _state.value.generateModels.map {
-                            if (it.url == model.url) it.copy(
+                            if (it.url == url) it.copy(
                                 fileName = tempFile.absolutePath(),
                                 localPath = tempFile.absolutePath()
                             ) else it
                         },
                     )
-
-                    /*
-                    val file = FileKit.openFileSaver(
-                        suggestedName = model.fileName?.urlToFileName() ?: model.name,
-                        extension = "gguf"
-                    )
-                    file?.let {
-                        val fullFilenameWithPath = "${file.path}${file.name}"
-                        Logger.d("LlamaVM - saving model to $fullFilenameWithPath")
-                        file.write(tempFile.readBytes())
-                        _state.value = _state.value.copy(
-                            embedModels = _state.value.embedModels.map { if (it.url == model.url) it.copy(fileName = fullFilenameWithPath) else it },
-                            generateModels = _state.value.generateModels.map { if (it.url == model.url) it.copy(fileName = fullFilenameWithPath) else it },
-                        )
-                    }
-                     */
-                }.onFailure { e ->
-                    updateDownload(model.url) {
-                        it.copy(
-                            inProgress = false,
-                            error = e.message ?: "Download failed"
-                        )
+                }.onFailure { error ->
+                    if (coroutineContext.isActive) {
+                        Logger.e(error.message ?: "Unknown error")
+                        updateDownload(url) {
+                            it.copy(
+                                inProgress = false,
+                                error = error.message,
+                                done = false
+                            )
+                        }
+                    } else {
+                        Logger.d { "LlamaVM - download cancelled for $url" }
                     }
                 }
             } catch (t: Throwable) {
-                updateDownload(model.url) {
-                    it.copy(
-                        inProgress = false,
-                        error = t.message ?: "Download failed"
-                    )
+                if (coroutineContext.isActive) {
+                    Logger.e(t) { "LlamaVM - download error for ${model.name}" }
+                    updateDownload(url) {
+                        it.copy(
+                            inProgress = false,
+                            error = t.message,
+                            done = false
+                        )
+                    }
+                } else {
+                    Logger.d { "LlamaVM - download cancelled for $url" }
                 }
+            } finally {
+                downloadJobs.remove(url)
+            }
+        }
+
+        downloadJobs[url] = job
+    }
+
+    fun onCancelDownload(model: LlamaModel) {
+        val url = model.url
+        val job = downloadJobs[url]
+
+        if (job != null) {
+            Logger.d { "LlamaVM - cancelling download for $url" }
+            job.cancel()
+            downloadJobs.remove(url)
+
+            updateDownload(url) {
+                it.copy(
+                    inProgress = false,
+                    done = false,
+                    progress = 0,
+                    error = "Cancelled"
+                )
+            }
+        }
+    }
+
+    fun onDeleteModel(model: LlamaModel) {
+        screenModelScope.launch(Dispatchers.IO) {
+            try {
+                Logger.d("LlamaVM - deleting model ${model.name}")
+
+                val pathFromState = model.localPath
+                val pathFromStorage = getModelsUseCase.getSavedModelPath(model.name)
+                    .takeIf { it.isNotEmpty() }
+                val path = pathFromState ?: pathFromStorage
+
+                if (!path.isNullOrEmpty()) {
+                    Logger.d("LlamaVM - delete model file at $path")
+
+                    try {
+                        model.fileName?.let { fileName ->
+                            LlamatikTempFile(fileName).delete(path)
+                        }
+                    } catch (e: Throwable) {
+                        Logger.e(e) { "LlamaVM - failed to delete file at $path" }
+                    }
+                }
+
+                getModelsUseCase.deleteModelPath(model)
+                _state.value = _state.value.copy(
+                    embedModels = _state.value.embedModels.map {
+                        if (it.url == model.url) it.copy(
+                            fileName = null,
+                            localPath = null
+                        ) else it
+                    },
+                    generateModels = _state.value.generateModels.map {
+                        if (it.url == model.url) it.copy(
+                            fileName = null,
+                            localPath = null
+                        ) else it
+                    },
+                )
+            } catch (t: Throwable) {
+                Logger.e(t) { "LlamaVM - error deleting model ${model.name}" }
             }
         }
     }
@@ -304,8 +513,9 @@ class ChatBotViewModel(
         return this
     }
 
-
     override fun onDispose() {
+        activeRequestId = null
+        _state.value = _state.value.copy(isGenerating = false)
         LlamaBridge.shutdown()
     }
 
@@ -346,7 +556,6 @@ class ChatBotViewModel(
                         return@withContext
                     }
 
-                    // Tighter system prompt to discourage repetition
                     val systemPrompt = """
                         You are a concise technical assistant.
                         Use ONLY the CONTEXT to answer. If the context is insufficient, say briefly that you don't have enough information.
@@ -354,14 +563,11 @@ class ChatBotViewModel(
                         End your answer when done.
                     """.trimIndent()
 
-                    // Placeholder for streaming assistant
                     _conversation.value += ChatUiModel.Message("", ChatUiModel.Author.bot)
 
-                    // Build common chat history (user + any prior assistant turns), drop placeholder
                     val chatHistory: List<ChatMessage> =
                         toChatMessages(_conversation.value.dropLast(1))
 
-                    // Streaming with loop/echo guard
                     val requestId = kotlin.random.Random.nextLong().toString()
                     activeRequestId = requestId
                     val acc = StringBuilder()
@@ -369,9 +575,9 @@ class ChatBotViewModel(
                     ChatRunner.stream(
                         system = systemPrompt,
                         contexts = listOf(compact),
-                        messages = chatHistory,  // last item is the user question we just appended
+                        messages = chatHistory,
                         template = Gemma3,
-                        maxTokens = 256,         // keep turns tight to avoid run-ons
+                        maxTokens = 256,
                         onDelta = { chunk ->
                             if (activeRequestId != requestId) return@stream
                             if (chunk.isEmpty()) return@stream
@@ -381,13 +587,11 @@ class ChatBotViewModel(
                                     ChatUiModel.Message(acc.toString(), ChatUiModel.Author.bot)
                             _sideEffects.trySend(ChatBotSideEffects.ScrollToBottom)
 
-                            // ---- Loop/Echo Guard ----
                             if (looksLikeEchoOrLoop(
                                     full = acc.toString(),
                                     user = question
                                 )
                             ) {
-                                // finish early with the trimmed text
                                 val trimmed = trimLoop(acc.toString(), user = question)
                                 _conversation.value = _conversation.value.dropLast(1) +
                                         ChatUiModel.Message(trimmed, ChatUiModel.Author.bot)
@@ -431,14 +635,13 @@ class ChatBotViewModel(
         if (input.isBlank()) return
 
         screenModelScope.launch {
-            // 1) Append user message bubble
             _conversation.value += ChatUiModel.Message(input, ChatUiModel.Author.me)
             _sideEffects.trySend(ChatBotSideEffects.OnMessageLoading)
             _sideEffects.trySend(ChatBotSideEffects.ScrollToBottom)
+            _state.value = _state.value.copy(isGenerating = true)
 
             withContext(Dispatchers.IO) {
                 try {
-                    // 2) Instruction-style template (works better for small instruct GGUFs like SmolVLM/Phi/Gemma-instruct)
                     val prompt = buildString {
                         appendLine("You are a helpful, concise assistant. Answer clearly and directly.")
                         appendLine("Avoid long lists or repeating words. Keep answers short (3–6 sentences).")
@@ -449,7 +652,6 @@ class ChatBotViewModel(
                         append("### Response:\n")
                     }
 
-                    // 3) Insert a placeholder assistant bubble we will stream into
                     _conversation.value += ChatUiModel.Message("", ChatUiModel.Author.bot)
 
                     val requestId = kotlin.random.Random.nextLong().toString()
@@ -457,21 +659,17 @@ class ChatBotViewModel(
                     val acc = StringBuilder()
                     var completed = false
 
-                    // tiny anti-babble guard: if the same short token repeats too much, stop
                     fun looksLikeBabble(s: String): Boolean {
                         if (s.length < 60) return false
-                        // detect pathological repetition like "3, 3, 3, ..." or the same short token repeating
                         val tail = s.takeLast(200)
                         val collapsed = tail.replace("\\s+".toRegex(), " ").trim()
                         val commas = collapsed.count { it == ',' }
                         if (commas > 60) return true
-                        // repeated 1–3 char tokens 30+ times
                         val m =
                             Regex("""\b([A-Za-z0-9]{1,3})\b(?:[,\s]+\1\b){25,}""").find(collapsed)
                         return m != null
                     }
 
-                    // 4) Stream tokens directly from the bridge using the callback interface
                     LlamaBridge.generateStream(
                         prompt = prompt,
                         callback = object : GenStream {
@@ -483,25 +681,25 @@ class ChatBotViewModel(
                                         ChatUiModel.Message(acc.toString(), ChatUiModel.Author.bot)
                                 _sideEffects.trySend(ChatBotSideEffects.ScrollToBottom)
 
-                                // Your existing echo/loop guard (protects against model mirroring the user)
                                 if (looksLikeEchoOrLoop(full = acc.toString(), user = input)) {
                                     val trimmed = trimLoop(acc.toString(), user = input)
                                     _conversation.value = _conversation.value.dropLast(1) +
                                             ChatUiModel.Message(trimmed, ChatUiModel.Author.bot)
                                     completed = true
                                     activeRequestId = null
+                                    _state.value = _state.value.copy(isGenerating = false)
                                     _sideEffects.trySend(ChatBotSideEffects.OnMessageLoaded)
                                     return
                                 }
 
-                                // Anti-babble guard for tiny models
                                 if (looksLikeBabble(acc.toString())) {
                                     completed = true
                                     activeRequestId = null
-                                    // lightly trim trailing commas/dangling tokens
-                                    val cleaned = acc.toString().trim().trimEnd(',', ' ', '\n')
+                                    val cleaned =
+                                        acc.toString().trim().trimEnd(',', ' ', '\n')
                                     _conversation.value = _conversation.value.dropLast(1) +
                                             ChatUiModel.Message(cleaned, ChatUiModel.Author.bot)
+                                    _state.value = _state.value.copy(isGenerating = false)
                                     _sideEffects.trySend(ChatBotSideEffects.OnMessageLoaded)
                                 }
                             }
@@ -510,6 +708,7 @@ class ChatBotViewModel(
                                 if (activeRequestId != requestId || completed) return
                                 completed = true
                                 activeRequestId = null
+                                _state.value = _state.value.copy(isGenerating = false)
                                 _sideEffects.trySend(ChatBotSideEffects.OnMessageLoaded)
                             }
 
@@ -521,16 +720,26 @@ class ChatBotViewModel(
                                             ChatUiModel.Author.bot
                                         )
                                 activeRequestId = null
+                                _state.value = _state.value.copy(isGenerating = false)
                                 _sideEffects.trySend(ChatBotSideEffects.OnLoadError)
                             }
                         }
                     )
                 } catch (t: Throwable) {
                     emitBot("There is a problem with the AI: ${t.message ?: "Unknown error"}")
+                    _state.value = _state.value.copy(isGenerating = false)
                     _sideEffects.trySend(ChatBotSideEffects.OnLoadError)
                 }
             }
         }
+    }
+
+    /** Called from UI Stop button – logical stop + native cancellation */
+    fun stopGeneration() {
+        Logger.d { "LlamaVM - stopGeneration()" }
+        LlamaBridge.nativeCancelGenerate()
+        activeRequestId = null
+        _state.value = _state.value.copy(isGenerating = false)
     }
 
     private fun emitBot(text: String) {
@@ -567,6 +776,7 @@ class ChatBotViewModel(
 
     fun onClearConversation() {
         activeRequestId = null
+        _state.value = _state.value.copy(isGenerating = false)
         screenModelScope.launch { _conversation.emit(emptyList()) }
     }
 
@@ -584,7 +794,16 @@ class ChatBotViewModel(
 
     private fun onPrivacyAccepted() {
         settings.putBoolean(PRIVACY_CHATBOT_VIEWED_KEY, true)
+        hasAcceptedPrivacy = true
         navigator.pop()
+
+        // After onboarding is closed, start initial setup (Gemma 3 download) if needed.
+        screenModelScope.launch(Dispatchers.IO) {
+            val models = _state.value.generateModels.ifEmpty {
+                getModelsUseCase.getDefaultGenerateModels().getOrElse { emptyList() }
+            }
+            startInitialSetupIfNeeded(models)
+        }
     }
 
     // --- mapping helpers ---
@@ -601,18 +820,14 @@ class ChatBotViewModel(
 
     // --- Echo/loop guard utilities ---
 
-    /** Detects obvious loops: question echoed, or a long suffix repeated twice. */
     private fun looksLikeEchoOrLoop(full: String, user: String): Boolean {
         val f = full.trim()
         if (f.isEmpty()) return false
 
-        // 1) If the model starts echoing the question again after the first 80 chars, stop
         val idx = f.indexOf(user, startIndex = minOf(80, f.length))
         if (idx >= 0) return true
 
-        // 2) Repetition of a long span (n-gram) near the end
         val tail = f.takeLast(minOf(400, f.length))
-        // Look for the last sentence (>= 60 chars) being duplicated
         val sentences =
             tail.split(Regex("(?<=[.!?])\\s+")).map { it.trim() }.filter { it.length >= 60 }
         if (sentences.isNotEmpty()) {
@@ -624,7 +839,6 @@ class ChatBotViewModel(
         return false
     }
 
-    /** Trim after the first occurrence of repeated content or before echoed question. */
     private fun trimLoop(full: String, user: String): String {
         val f = full.trim()
         val idxEcho = f.indexOf(user, startIndex = minOf(80, f.length))
@@ -684,6 +898,12 @@ data class ChatBotState(
     val isGenerateModelLoaded: Boolean = false,
     val selectedEmbedModelName: String? = null,
     val selectedGenerateModelName: String? = null,
+    val isGenerating: Boolean = false,
+
+    // Initial setup overlay state
+    val isInitialSetup: Boolean = false,
+    val initialSetupModelName: String? = null,
+    val initialSetupProgress: Int = 0,
 )
 
 sealed class ChatBotSideEffects {
