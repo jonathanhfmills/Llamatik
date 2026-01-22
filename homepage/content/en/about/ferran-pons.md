@@ -9,4 +9,4 @@ promoted: true
 weight: 1
 ---
 
-With almost 20 years of experience as a programmer, my experience covers a lot of different kinds of applications, from web app development to desktop, mobile apps, and videogames.
+With almost 20 years of experience as a programmer, my experience covers a lot of different kinds of applications, from web app development to desktop, mobile apps, and video games.

@@ -118,10 +118,10 @@ name = "Github"
 url = "https://github.com/ferranpons/Llamatik"
 weight = 2
 
-#[[menu.main]]
-#name = "Docs"
-#url = "https://docs.llamatik.com"
-#weight = 3
+[[menu.main]]
+name = "Docs"
+url = "https://docs.llamatik.com"
+weight = 3
 
 [[menu.main]]
 name = "Contact"
@@ -144,6 +144,11 @@ name = "Blog"
 url = "/blog"
 weight = 2
 
+[[menu.footer]]
+name = "Docs"
+url = "https://docs.llamatik.com"
+weight = 3
+
 #[[menu.footer]]
 #name = "FAQ"
 #url = "/faq/"
@@ -157,4 +162,4 @@ weight = 2
 [[menu.footer]]
 name = "About"
 url = "/about/"
-weight = 3
+weight = 4
