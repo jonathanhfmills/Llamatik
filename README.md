@@ -5,10 +5,35 @@
 <h1 align="center">Llamatik</h1>
 
 <p align="center">
-  Kotlin-first llama.cpp integration for on-device and remote LLM inference.
+  <b>Run LLMs locally on Android, iOS, and Desktop — using a single Kotlin API.</b>
 </p>
 
-<p align="center"><i>Kotlin. LLMs. On your terms.</i></p>
+<p align="center">
+  Offline-first · Privacy-preserving · Kotlin Multiplatform
+</p>
+
+<p align="center">
+  <a href="https://central.sonatype.com/artifact/com.llamatik/library">
+    <img src="https://img.shields.io/maven-central/v/com.llamatik/library.svg" />
+  </a>
+  <img src="https://img.shields.io/badge/Kotlin-Multiplatform-blueviolet" />
+  <img src="https://img.shields.io/badge/Platforms-Android%20%7C%20iOS%20%7C%20Desktop-green" />
+  <img src="https://img.shields.io/badge/LLM-llama.cpp-orange" />
+  <img src="https://img.shields.io/badge/License-MIT-lightgrey" />
+</p>
+
+---
+
+## ✨ What is Llamatik?
+
+**Llamatik** is a **Kotlin Multiplatform library** that lets you run **large language models locally**
+using **llama.cpp**, with optional remote inference — all behind a **unified Kotlin API**.
+
+No Python.  
+No mandatory servers.  
+Your models, your data, your device.
+
+Designed for **privacy-first**, **offline-capable**, and **cross-platform** AI applications.
 
 ---
 
@@ -17,56 +42,87 @@
 <img align="right" width="0" height="368px" hspace="20"/>
 <img src="assets/androidScreenshots/phoneScreenshot3.png" height="368px" align="right" />
 
-- ✅ Kotlin Multiplatform: shared code across Android, iOS, and desktop  
-- ✅ Offline inference via llama.cpp (compiled with Kotlin/Native bindings)  
-- ✅ Remote inference via optional HTTP client (e.g. llamatik-server)  
-- ✅ Embeddings support for vector search & retrieval  
-- ✅ Text generation (non-streaming and streaming)  
-- ✅ Context-aware generation (system + conversation history)  
-- ✅ Works with GGUF models (e.g. Mistral, Phi, LLaMA)  
-- ✅ Lightweight and dependency-free runtime  
-- ✅ Schema-Constrained JSON Generation
+### 🔐 On-device & Private
+- ✅ Fully offline inference via **llama.cpp**
+- ✅ No network, no data exfiltration
+- ✅ Works with **GGUF** models (Mistral, Phi, LLaMA, etc.)
 
-##### Try it NOW
+### 🧩 Kotlin Multiplatform
+- ✅ Shared Kotlin API across **Android, iOS, Desktop**
+- ✅ Native performance via Kotlin/Native + C++
+- ✅ Lightweight, dependency-free runtime
 
-If you want to try how LLamatik works, you can download the App on the App Store or Google Play Store.<br><br>
-<a href="https://play.google.com/store/apps/details?id=com.llamatik.app.android"><img src="assets/google-play-button.png" align="left" width="200px" height="68px"/></a> <a href="https://apple.co/3Md7EIh"><img src="assets/app-store-button.png" align="left" width="200px" height="76px"/></a>
-<br><br><br>
+### 🧠 LLM Capabilities
+- ✅ Text generation (non-streaming & streaming)
+- ✅ Context-aware generation (system + history)
+- ✅ **Schema-constrained JSON generation**
+- ✅ Embeddings for vector search & RAG
+
+### 🌐 Hybrid & Remote
+- ✅ Optional HTTP client for remote inference
+- ✅ Drop-in backend server (`llamatik-backend`)
+- ✅ Seamlessly switch between local and remote inference
+
+---
+
+## 📱 Try it now (No setup required)
+
+Want to see Llamatik in action before integrating it?
+
+The **Llamatik App** showcases:
+- On-device inference
+- Streaming generation
+- Privacy-first AI (no cloud required)
+
+<a href="https://play.google.com/store/apps/details?id=com.llamatik.app.android">
+  <img src="assets/google-play-button.png" width="200px"/>
+</a>
+<a href="https://apple.co/3Md7EIh">
+  <img src="assets/app-store-button.png" width="200px"/>
+</a>
 
 ---
 
 ## 🔧 Use Cases
 
-- 🧠 On-device chatbots  
-- 📚 Local RAG systems  
-- 🛰️ Hybrid AI apps with fallback to remote LLMs  
-- 🎮 Game AI, assistants, and dialogue generators  
+- 🧠 On-device chatbots & assistants
+- 📚 Local RAG systems
+- 🛰️ Hybrid AI apps (offline-first, online fallback)
+- 🎮 Game AI & procedural dialogue
 
 ---
 
 ## 🧱 Architecture
 
-Llamatik provides three core modules:
+Your App
+│
+▼
+LlamaBridge (shared Kotlin API)
+│
+├─ llamatik-core     → Native llama.cpp (on-device)
+├─ llamatik-client   → Remote HTTP inference
+└─ llamatik-backend  → llama.cpp-compatible server
 
-- `llamatik-core`: Native C++ llama.cpp integration via Kotlin/Native  
-- `llamatik-client`: Lightweight HTTP client to connect to remote llama.cpp-compatible backends  
-- `llamatik-backend`: Lightweight llama.cpp HTTP server  
-
-All backed by a shared Kotlin API so you can switch between local and remote seamlessly.
+Switching between **local and remote inference requires no API changes** —
+only configuration.
 
 ---
 
 ## 🔧 Requirements
 
-- iOS Deployment Target 16.6 
+- iOS Deployment Target: **16.6+**
 
 ---
 
-## 📦 Library Installation
+## 📦 Installation
 
-Llamatik is published on **Maven Central**.
+Llamatik is published on **Maven Central** and follows **semantic versioning**.
 
-- Add to your **`settings.gradle.kts`**:
+- No custom Gradle plugins
+- No manual native toolchain setup
+- Works with standard Kotlin Multiplatform projects
+
+### Repository setup
 
 ```kotlin
 dependencyResolutionManagement {
@@ -75,14 +131,27 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-```
 
-- Add to your `build.gradle.kts`:
-
-```kotlin
 commonMain.dependencies {
     implementation("com.llamatik:library:0.12.0")
 }
+```
+
+---
+
+## ⚡ Quick Start
+
+```kotlin
+// Resolve model path (place GGUF in assets / bundle)
+val modelPath = LlamaBridge.getModelPath("phi-2.Q4_0.gguf")
+
+// Load model
+LlamaBridge.initGenerateModel(modelPath)
+
+// Generate text
+val output = LlamaBridge.generate(
+"Explain Kotlin Multiplatform in one sentence."
+)
 ```
 
 ---
@@ -123,7 +192,17 @@ expect object LlamaBridge {
         callback: GenStream
     )
 
+    // Text generation with JSON schema (non-streaming)
+    fun generateJson(prompt: String, jsonSchema: String? = null): String
+    fun generateJsonWithContext(
+        systemPrompt: String,
+        contextBlock: String,
+        userPrompt: String,
+        jsonSchema: String? = null
+    ): String
+
     // Convenience streaming overload (callbacks)
+    fun generateStream(prompt: String, callback: GenStream)
     fun generateStreamWithContext(
         system: String,
         context: String,
@@ -131,6 +210,16 @@ expect object LlamaBridge {
         onDelta: (String) -> Unit,
         onDone: () -> Unit,
         onError: (String) -> Unit
+    )
+    
+    // Text generation with JSON schema (streaming)
+    fun generateJsonStream(prompt: String, jsonSchema: String? = null, callback: GenStream)
+    fun generateJsonStreamWithContext(
+        systemPrompt: String,
+        contextBlock: String,
+        userPrompt: String,
+        jsonSchema: String? = null,
+        callback: GenStream
     )
 
     fun nativeCancelGenerate()                        // cancel generation
@@ -143,68 +232,50 @@ interface GenStream {
 }
 ```
 
-### Quick start (Android)
-
-```kotlin
-// 1) Resolve model paths (place GGUF in androidMain/assets)
-val embPath = LlamaBridge.getModelPath("mistral-embed.Q4_0.gguf")
-val genPath = LlamaBridge.getModelPath("phi-2.Q4_0.gguf")
-
-// 2) Load models
-LlamaBridge.initModel(embPath)
-LlamaBridge.initGenerateModel(genPath)
-
-// 3a) Embeddings
-val vec: FloatArray = LlamaBridge.embed("Kotlin ❤️ llama.cpp")
-
-// 3b) Non-streamed generation
-val reply: String = LlamaBridge.generate("Write a haiku about Kotlin.")
-
-// 3c) Streaming generation with callbacks
-LlamaBridge.generateStreamWithContext(
-    system = "You are a concise assistant.",
-    context = "Project: Llamatik readme refresh.",
-    user = "List 3 key features.",
-    onDelta = { delta -> /* append to UI */ },
-    onDone  = { /* enable send */ },
-    onError = { err -> /* show error */ }
-)
-```
-
-### Notes
-
-- Call `shutdown()` on app teardown to release native resources.  
-- `getModelPath()` is `@Composable` to allow platform-specific asset access where needed.  
-- Use GGUF models compatible with your build of llama.cpp (quantization, context size, etc.).  
-
----
-
 ## 🧑‍💻 Backend Usage
 
 Please go to the [Backend README.md](./backend/README.md) for more information.
 
 ---
 
-## Try LLamatik App
+## 🔍 Why Llamatik?
 
-If you want to try how LLamatik works you can download the App on the App Store or Google Play Store.
+- ✅ Built directly on llama.cpp
+- ✅ Offline-first & privacy-preserving
+- ✅ No runtime dependencies
+- ✅ Open-source (MIT)
+- ✅ Used by real Android & iOS apps
+- ✅ Designed for long-term Kotlin Multiplatform support
 
-<a href="https://play.google.com/store/apps/details?id=com.llamatik.app.android"><img src="assets/google-play-button.png" align="left" width="200px" height="68px"/></a> <a href="https://apple.co/3Md7EIh"><img src="assets/app-store-button.png" align="left" width="200px" height="76px"/></a>
-</br></br></br>
+---
 
+## 📦 Apps using Llamatik
 
-## Apps using Llamatik
+Llamatik is already used in production apps on Google Play and App Store.
 
-The following is a list of some of the public apps using Llamatik and are published on the Google Play Store and App Store.
+Want to showcase your app here?
+Open a PR and add it to the list 🚀
 
-Want to add your app? Found an app that no longer works or no longer uses Llamatik? Please submit a pull request on GitHub to update this page!
+---
+
+## 📦 Apps using Llamatik
+
+Llamatik is already used in production apps on Google Play and App Store.
+
+Want to showcase your app here?
+Open a PR and add it to the list 🚀
 
 ---
 
 ## 🤝 Contributing
 
-Llamatik is 100% open-source and actively developed.  
-Contributions, bug reports, and feature suggestions are welcome!
+Llamatik is 100% open-source and actively developed.
+- Bug reports
+- Feature requests
+- Documentation improvements
+- Platform extensions
+
+All contributions are welcome!
 
 ---
 
