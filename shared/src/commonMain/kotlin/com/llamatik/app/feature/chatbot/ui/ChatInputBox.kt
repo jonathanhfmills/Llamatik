@@ -3,6 +3,7 @@ package com.llamatik.app.feature.chatbot.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -23,15 +24,13 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
@@ -47,6 +46,8 @@ fun ChatInputBox(
     state: ChatBotState,
     viewModel: ChatBotViewModel,
     showSuggestions: MutableState<Boolean>,
+    input: TextFieldValue,
+    onInputChange: (TextFieldValue) -> Unit,
     suggestions: List<String> = listOf(
         localization.suggestion1,
         localization.suggestion2,
@@ -63,10 +64,6 @@ fun ChatInputBox(
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        var input by rememberSaveable(stateSaver = TextFieldValue.Saver) {
-            mutableStateOf(TextFieldValue())
-        }
-
         val isGenerating = state.isGenerating
         Column(
             horizontalAlignment = Alignment.Start,
@@ -83,10 +80,10 @@ fun ChatInputBox(
 
                         Surface(
                             onClick = {
-                                input = TextFieldValue(hint)
+                                onInputChange(TextFieldValue(hint))
                                 val message = input.text.trim()
                                 if (message.isNotEmpty()) {
-                                    input = TextFieldValue()
+                                    onInputChange(TextFieldValue())
                                     viewModel.onMessageSendDirect(message)
                                     showSuggestions.value = false
                                 }
@@ -120,10 +117,15 @@ fun ChatInputBox(
                     .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
                 val keyboardController = LocalSoftwareKeyboardController.current
+                val clipboard = LocalClipboardManager.current
+
                 val canSend = input.text.isNotBlank()
+                val clipboardText = clipboard.getText()?.text?.trim().orEmpty()
+                val canPaste = clipboardText.isNotBlank()
+
                 TextField(
                     value = input,
-                    onValueChange = { input = it },
+                    onValueChange = { onInputChange(it) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 2.dp),
@@ -141,7 +143,7 @@ fun ChatInputBox(
                         onSend = {
                             if (!isGenerating && canSend) {
                                 val message = input.text.trim()
-                                input = TextFieldValue()
+                                onInputChange(TextFieldValue())
                                 viewModel.onMessageSendDirect(message)
                                 showSuggestions.value = false
                                 keyboardController?.hide()
@@ -156,50 +158,82 @@ fun ChatInputBox(
                         unfocusedIndicatorColor = Color.Transparent
                     ),
                     trailingIcon = {
-                        if (isGenerating) {
-                            IconButton(
-                                onClick = {
-                                    viewModel.stopGeneration()
-                                },
-                                modifier = Modifier
-                                    .padding(end = 8.dp)
-                                    .size(40.dp)
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .background(MaterialTheme.colorScheme.errorContainer)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Stop,
-                                    contentDescription = localization.stop,
-                                    tint = MaterialTheme.colorScheme.onErrorContainer
-                                )
-                            }
-                        } else {
-                            IconButton(
-                                onClick = {
-                                    if (canSend) {
-                                        val message = input.text.trim()
-                                        input = TextFieldValue()
-                                        viewModel.onMessageSendDirect(message)
-                                        showSuggestions.value = false
-                                        keyboardController?.hide()
-                                    }
-                                },
-                                enabled = canSend,
-                                modifier = Modifier
-                                    .padding(end = 8.dp)
-                                    .size(40.dp)
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .background(
-                                        if (canSend) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.surfaceVariant
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (canPaste) {
+                                IconButton(
+                                    onClick = {
+                                        val text = clipboard.getText()?.text?.trim().orEmpty()
+                                        if (text.isNotBlank()) {
+                                            onInputChange(
+                                                TextFieldValue(
+                                                    text = text,
+                                                    selection = TextRange(text.length)
+                                                )
+                                            )
+                                            showSuggestions.value = false
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .padding(end = 6.dp)
+                                        .size(40.dp)
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                                ) {
+                                    Icon(
+                                        imageVector = LlamatikIcons.Paste,
+                                        contentDescription = localization.paste,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
-                            ) {
-                                Icon(
-                                    imageVector = LlamatikIcons.Send,
-                                    contentDescription = localization.send,
-                                    tint = if (canSend) MaterialTheme.colorScheme.onPrimary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                }
+
+                                Spacer(modifier = Modifier.size(6.dp))
+                            }
+
+                            if (isGenerating) {
+                                IconButton(
+                                    onClick = {
+                                        viewModel.stopGeneration()
+                                    },
+                                    modifier = Modifier
+                                        .padding(end = 8.dp)
+                                        .size(40.dp)
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(MaterialTheme.colorScheme.errorContainer)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Stop,
+                                        contentDescription = localization.stop,
+                                        tint = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                            } else {
+                                IconButton(
+                                    onClick = {
+                                        if (canSend) {
+                                            val message = input.text.trim()
+                                            onInputChange(TextFieldValue())
+                                            viewModel.onMessageSendDirect(message)
+                                            showSuggestions.value = false
+                                            keyboardController?.hide()
+                                        }
+                                    },
+                                    enabled = canSend,
+                                    modifier = Modifier
+                                        .padding(end = 8.dp)
+                                        .size(40.dp)
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(
+                                            if (canSend) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.surfaceVariant
+                                        )
+                                ) {
+                                    Icon(
+                                        imageVector = LlamatikIcons.Send,
+                                        contentDescription = localization.send,
+                                        tint = if (canSend) MaterialTheme.colorScheme.onPrimary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
                     },
