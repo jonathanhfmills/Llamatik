@@ -38,18 +38,28 @@ import platform.posix.memcpy
  * Key points:
  * - All writing uses NSFileHandle (no repeated read+concat into a single NSData).
  * - Base64 helpers still use NSData, but only on-demand.
- * - Files are stored under NSTemporaryDirectory().
+ * - Files are stored under NSTemporaryDirectory() while downloading and moved into
+ *   Application Support / Llamatik / models for persistence.
+ *
+ * IMPORTANT CHANGE:
+ * - We **preserve the filename and extension supplied by the caller**.
+ *   Do not force a `.gguf` suffix here. If you want to normalize to `.gguf`
+ *   do it upstream where you choose which model format you are downloading.
  */
 
 // ---------- Name & path helpers ----------
 
 /**
- * Normalize a model file name:
- * - If it already contains a dot (e.g. ".gguf"), keep it.
- * - Else, assume it's a GGUF model and append ".gguf".
+ * Previously we appended ".gguf" if the filename lacked a dot.
+ * That caused models to be saved without their real extension.
+ *
+ * New policy:
+ * - If the caller provides a filename with an extension -> keep it.
+ * - If no extension is provided -> keep it as-is (don't force .gguf).
+ *   The caller / registry should supply the correct extension (.bin/.gguf).
  */
 private fun normalizedModelName(fileName: String): String =
-    if (fileName.contains('.')) fileName else "$fileName.gguf"
+    fileName // preserve exactly what caller passed (including extension if present)
 
 /**
  * Base temp directory for model files.
@@ -94,6 +104,7 @@ private fun fileExists(path: String): Boolean =
 /**
  * Create an empty file at [path] if it does not already exist.
  */
+@OptIn(ExperimentalForeignApi::class)
 private fun ensureFileExists(path: String) {
     val fm = NSFileManager.defaultManager
     if (!fm.fileExistsAtPath(path)) {
@@ -103,11 +114,6 @@ private fun ensureFileExists(path: String) {
 
 // ---------- Low-level write helpers using NSFileHandle ----------
 
-/**
- * Write [data] (NSData) to [path] using NSFileHandle.
- *
- * @param append If true, seek to end of file; otherwise truncate to 0 first.
- */
 @OptIn(ExperimentalForeignApi::class)
 private fun writeNSDataToFile(path: String, data: NSData, append: Boolean) {
     ensureFileExists(path)
@@ -120,10 +126,8 @@ private fun writeNSDataToFile(path: String, data: NSData, append: Boolean) {
 
     try {
         if (!append) {
-            // Truncate to 0
             handle.truncateFileAtOffset(0uL)
         } else {
-            // Seek to end
             handle.seekToEndOfFile()
         }
         handle.writeData(data)
@@ -144,7 +148,6 @@ actual suspend fun ByteReadChannel.writeToFile(fileName: String) {
     println("🔵 [iOS] ByteReadChannel.writeToFile → $path")
 
     val fm = NSFileManager.defaultManager
-    // Create an empty file (or overwrite if exists)
     fm.createFileAtPath(path, null, null)
 
     val handle: NSFileHandle? = NSFileHandle.fileHandleForWritingAtPath(path)
@@ -154,7 +157,6 @@ actual suspend fun ByteReadChannel.writeToFile(fileName: String) {
     }
 
     try {
-        // Ensure we start from offset 0
         handle.truncateFileAtOffset(0uL)
 
         val buffer = ByteArray(256 * 1024)
@@ -233,13 +235,11 @@ actual class LlamatikTempFile actual constructor(fileName: String) {
     }
 
     actual fun appendBytes(bytes: ByteArray) {
-        // println("🔵 [iOS] LlamatikTempFile.appendBytes → $path (len=${bytes.size})")
         val data = byteArrayToNSData(bytes)
         writeNSDataToFile(path, data, append = true)
     }
 
     actual fun readBytes(): ByteArray {
-        // println("🔵 [iOS] LlamatikTempFile.readBytes ← $path")
         val data = NSData.create(contentsOfFile = path) ?: return ByteArray(0)
         return nsDataToByteArray(data)
     }
@@ -275,10 +275,8 @@ actual class LlamatikTempFile actual constructor(fileName: String) {
         val fileManager = NSFileManager.defaultManager
         return try {
             if (!fileManager.fileExistsAtPath(path)) {
-                // Already gone, treat as success
                 true
             } else {
-                // removeItemAtPath returns true on success
                 fileManager.removeItemAtPath(path, error = null)
             }
         } catch (_: Throwable) {
@@ -296,33 +294,26 @@ actual fun migrateModelPathIfNeeded(
 
     val fm = NSFileManager.defaultManager
 
-    // If it doesn't exist, nothing we can do (keep old path so caller can handle it)
     if (!fm.fileExistsAtPath(savedPath)) return savedPath
 
     val persistentDir = modelsDirIos().path ?: return savedPath
 
-    // Already in persistent models dir
     if (savedPath.startsWith(persistentDir)) return savedPath
 
     val destPath = stableModelFileIos(modelNameOrFileName).path ?: return savedPath
 
-    // Ensure parent dir exists
     ensureDirExistsIos(modelsDirIos())
 
-    // If destination exists, replace it
     if (fm.fileExistsAtPath(destPath)) {
         runCatching { fm.removeItemAtPath(destPath, null) }
     }
 
-    // Try move first (fast)
     val movedOk = fm.moveItemAtPath(savedPath, destPath, null)
     if (movedOk) {
-        // cleanup leftover .part next to final file
         runCatching { fm.removeItemAtPath(destPath + ".part", null) }
         return destPath
     }
 
-    // Fallback: copy + delete
     val copiedOk = fm.copyItemAtPath(savedPath, destPath, null)
     if (copiedOk) {
         runCatching { fm.removeItemAtPath(savedPath, null) }
@@ -343,22 +334,24 @@ private fun modelsDirIos(): NSURL {
         create = true,
         error = null
     ) ?: run {
-        // very defensive fallback: use tmp-ish unique dir under Application Support if URLForDirectory fails
         val tmp = NSURL.fileURLWithPath("/tmp").URLByAppendingPathComponent("llamatik", true)!!
         ensureDirExistsIos(tmp)
         return tmp
     }
 
-    // Application Support / Llamatik / models
     val app = base.URLByAppendingPathComponent("Llamatik", true)!!
     val models = app.URLByAppendingPathComponent("models", true)!!
     ensureDirExistsIos(models)
     return models
 }
 
+/**
+ * Keep the original filename (including extension). Do NOT append .gguf here.
+ * Caller should provide the intended file name (for example "ggml-base-q8_0.bin")
+ */
 private fun stableModelFileIos(modelNameOrFileName: String): NSURL {
     val safeName = sanitizeFileName(modelNameOrFileName).ifBlank { "model_${NSUUID.UUID().UUIDString}" }
-    return modelsDirIos().URLByAppendingPathComponent("$safeName.gguf", false)!!
+    return modelsDirIos().URLByAppendingPathComponent(safeName, false)!!
 }
 
 @OptIn(ExperimentalForeignApi::class)
@@ -375,7 +368,6 @@ private fun ensureDirExistsIos(dir: NSURL) {
 }
 
 private fun sanitizeFileName(input: String): String {
-    // close enough to your Android sanitize: keep alnum . _ - ; replace others with _
     var out = input
     val invalid = Regex("[^A-Za-z0-9._-]")
     out = out.replace(invalid, "_")

@@ -17,6 +17,7 @@
   <img src="https://img.shields.io/badge/Kotlin-Multiplatform-blueviolet" alt="kmp badge"/>
   <img src="https://img.shields.io/badge/Platforms-Android%20%7C%20iOS%20%7C%20Desktop-green" alt="platforms badge"/>
   <img src="https://img.shields.io/badge/LLM-llama.cpp-orange" alt="llama.cpp badge"/>
+  <img src="https://img.shields.io/badge/STT-whisper.cpp-blue" alt="whisper.cpp badge"/>
   <img src="https://img.shields.io/badge/License-MIT-lightgrey" alt="license badge"/>
 </p>
 
@@ -24,8 +25,12 @@
 
 ## ✨ What is Llamatik?
 
-**Llamatik** is a **Kotlin Multiplatform library** that lets you run **large language models locally**
-using **llama.cpp**, with optional remote inference — all behind a **unified Kotlin API**.
+**Llamatik** is a Kotlin Multiplatform library that lets you run:
+
+- 🧠 **Large Language Models (LLMs)** via `llama.cpp`
+- 🎙 **Speech-to-Text (STT)** via `whisper.cpp`
+
+...fully **on-device**, with optional remote inference — all behind a **unified Kotlin API**.
 
 No Python.  
 No mandatory servers.  
@@ -42,19 +47,29 @@ Designed for **privacy-first**, **offline-capable**, and **cross-platform** AI a
 
 ### 🔐 On-device & Private
 - ✅ Fully offline inference via **llama.cpp**
-- ✅ No network, no data exfiltration
-- ✅ Works with **GGUF** models (Mistral, Phi, LLaMA, etc.)
-
-### 🧩 Kotlin Multiplatform
-- ✅ Shared Kotlin API across **Android, iOS, Desktop**
-- ✅ Native performance via Kotlin/Native + C++
-- ✅ Lightweight, dependency-free runtime
+- ✅ On-device speech recognition via **whisper.cpp**
+- ✅ No network required
+- ✅ No data exfiltration
+- ✅ Works with **GGUF** (LLMs) and **GGML** (Whisper) models
 
 ### 🧠 LLM Capabilities
 - ✅ Text generation (non-streaming & streaming)
 - ✅ Context-aware generation (system + history)
 - ✅ **Schema-constrained JSON generation**
 - ✅ Embeddings for vector search & RAG
+
+### 🎙 Speech-to-Text (whisper.cpp)
+- ✅ On-device transcription
+- ✅ Works fully offline
+- ✅ 16kHz mono WAV support
+- ✅ Selectable Whisper models
+- ✅ Integrated model download + management
+
+### 🧩 Kotlin Multiplatform
+- ✅ Shared API across **Android, iOS, Desktop**
+- ✅ Native C++ integration via Kotlin/Native
+- ✅ Static frameworks for iOS
+- ✅ JNI for Desktop
 
 ### 🌐 Hybrid & Remote
 - ✅ Optional HTTP client for remote inference
@@ -70,7 +85,9 @@ Want to see Llamatik in action before integrating it?
 The **Llamatik App** showcases:
 - On-device inference
 - Streaming generation
+- Speech-to-text (Whisper)
 - Privacy-first AI (no cloud required)
+- Downloadable models
 
 <a href="https://play.google.com/store/apps/details?id=com.llamatik.app.android"><img src="assets/google-play-button.png" width="200px"/></a>
 <a href="https://apple.co/3Md7EIh"><img src="assets/app-store-button.png" width="200px"/></a>
@@ -86,7 +103,7 @@ The **Llamatik App** showcases:
 
 ---
 
-## 🧱 Architecture
+## 🧱 Architecture (WIP)
 
 ```
 Your App
@@ -112,6 +129,7 @@ only configuration.
 ## 📦 Current Versions
 
 - llama.cpp version: [b7815](https://github.com/ggml-org/llama.cpp/releases/tag/b7815)
+- whisper.cpp version [v1.8.3](https://github.com/ggml-org/whisper.cpp/releases/tag/v1.8.3)
 
 ---
 
@@ -134,7 +152,7 @@ dependencyResolutionManagement {
 }
 
 commonMain.dependencies {
-    implementation("com.llamatik:library:0.15.0")
+    implementation("com.llamatik:library:0.16.0")
 }
 ```
 
@@ -161,7 +179,7 @@ val output = LlamaBridge.generate(
 
 The public Kotlin API is defined in `LlamaBridge` (an `expect object` with platform-specific `actual` implementations).
 
-### API surface
+### API surface (LlamaBridge)
 
 ```kotlin
 @Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
@@ -233,6 +251,59 @@ interface GenStream {
 }
 ```
 
+### Speech-to-Text (WhisperBridge)
+
+WhisperBridge exposes a small, platform-friendly wrapper around whisper.cpp for on-device speech-to-text.
+
+The workflow is:
+1.	Download a Whisper ggml model (e.g. ggml-tiny-q8_0.bin) to local storage (the app does this for you).
+2.	Initialize Whisper once with the local model path.
+3.	Record audio to a WAV file and transcribe it.
+
+### Whisper API surface
+
+```kotlin
+object WhisperBridge {
+    /** Returns a platform-specific absolute path for the model filename. */
+    fun getModelPath(modelFileName: String): String
+
+    /** Loads the model at [modelPath]. Returns true if loaded. */
+    fun initModel(modelPath: String): Boolean
+
+    /**
+     * Transcribes a WAV file and returns text.
+     * Tip: record WAV as 16 kHz, mono, 16-bit PCM for best compatibility.
+     */
+    fun transcribeWav(wavPath: String, language: String? = null): String
+
+    /** Frees native resources. */
+    fun release()
+}
+```
+
+#### Example
+
+```kotlin
+import com.llamatik.library.platform.WhisperBridge
+
+val modelPath = WhisperBridge.getModelPath("ggml-tiny-q8_0.bin")
+
+// 1) Init once (e.g. app start)
+WhisperBridge.initModel(modelPath)
+
+// 2) Record to a WAV file (16kHz mono PCM16) using your own recorder
+val wavPath: String = "/path/to/recording.wav"
+
+// 3) Transcribe
+val text = WhisperBridge.transcribeWav(wavPath, language = null).trim()
+println(text)
+
+// 4) Optional: release on app shutdown
+WhisperBridge.release()
+```
+
+**Note**: WhisperBridge expects a WAV file path. Llamatik’s app uses AudioRecorder + AudioPaths.tempWavPath() to generate the WAV before calling transcribeWav(...).
+
 ## 🧑‍💻 Backend Usage
 
 Please go to the [Backend README.md](./backend/README.md) for more information.
@@ -241,7 +312,7 @@ Please go to the [Backend README.md](./backend/README.md) for more information.
 
 ## 🔍 Why Llamatik?
 
-- ✅ Built directly on llama.cpp
+- ✅ Built directly on llama.cpp and whisper.cpp
 - ✅ Offline-first & privacy-preserving
 - ✅ No runtime dependencies
 - ✅ Open-source (MIT)
