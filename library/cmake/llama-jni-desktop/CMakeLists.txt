@@ -48,6 +48,9 @@ add_subdirectory("${LLAMA_CPP_DIR}" "${CMAKE_BINARY_DIR}/llama-wrapper-build")
 
 set(HAVE_WHISPER OFF)
 if(EXISTS "${WHISPER_CPP_DIR}/CMakeLists.txt")
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(WHISPER_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(WHISPER_BUILD_SHARED OFF CACHE BOOL "" FORCE)
     set(WHISPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(WHISPER_BUILD_SERVER OFF CACHE BOOL "" FORCE)
@@ -59,9 +62,9 @@ else()
     add_compile_definitions(LLAMATIK_NO_WHISPER=1)
 endif()
 
-# stable-diffusion.cpp (optional)
 set(HAVE_SD OFF)
 if(EXISTS "${STABLE_DIFFUSION_CPP_DIR}/CMakeLists.txt")
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     set(SD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(SD_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(SD_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
@@ -146,19 +149,37 @@ if(HAVE_WHISPER)
     )
 endif()
 
+# ---- Base llama.cpp ----
 target_link_libraries(llama_jni
     PRIVATE
     llama
 )
 
+# ---- stable-diffusion.cpp (robust target names) ----
 if(HAVE_SD)
-    target_link_libraries(llama_jni PRIVATE stable-diffusion)
+    if(TARGET stable-diffusion)
+        target_link_libraries(llama_jni PRIVATE stable-diffusion)
+    elseif(TARGET stable_diffusion)
+        target_link_libraries(llama_jni PRIVATE stable_diffusion)
+    elseif(TARGET stable-diffusion-lib)
+        target_link_libraries(llama_jni PRIVATE stable-diffusion-lib)
+    else()
+        message(FATAL_ERROR "Stable Diffusion target not found (expected one of: stable-diffusion, stable_diffusion, stable-diffusion-lib).")
+    endif()
 endif()
 
+# ---- whisper.cpp (robust target names) ----
 if(HAVE_WHISPER)
-    target_link_libraries(llama_jni PRIVATE whisper)
+    if(TARGET whisper)
+        target_link_libraries(llama_jni PRIVATE whisper)
+    elseif(TARGET whisper_static)
+        target_link_libraries(llama_jni PRIVATE whisper_static)
+    else()
+        message(FATAL_ERROR "Whisper target not found (expected 'whisper' or 'whisper_static').")
+    endif()
 endif()
 
+# Link llama.cpp 'common' utilities if present (schema, json helpers, etc.)
 if(TARGET common)
     target_link_libraries(llama_jni PRIVATE common)
     message(STATUS "Linking llama.cpp target: common")
