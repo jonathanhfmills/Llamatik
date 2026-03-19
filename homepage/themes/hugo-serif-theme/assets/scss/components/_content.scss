@@ -91,3 +91,42 @@
     border-left: .25em solid $primary;
   }
 }
+
+.products-screenshots {
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.products-screenshots img {
+  height: auto;
+  display: block;
+}
+
+.localfirst-content {
+  text-align: left;
+}
+
+.localfirst-content p {
+  margin-bottom: 1.25rem;
+}
+
+.localfirst-bullets {
+  margin: 1.5rem 0 0 1.25rem;
+  padding: 0;
+  text-align: left;
+}
+
+.localfirst-image-wrap {
+  display: flex;
+  justify-content: center;
+}
+
+.localfirst-image {
+  width: 100%;
+  max-width: 420px;
+  height: auto;
+  display: block;
+}
