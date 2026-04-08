@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.rounded.PictureAsPdf
+import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -91,6 +92,7 @@ fun ChatInputBox(
         }
     }
 
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -118,6 +120,7 @@ fun ChatInputBox(
                                     when (state.generationMode) {
                                         GenerationMode.TEXT -> viewModel.onMessageSendDirect(message)
                                         GenerationMode.IMAGE -> viewModel.onImagePromptSendDirect(message)
+                                        GenerationMode.VISION -> viewModel.onMessageSendDirect(message)
                                     }
                                     showSuggestions.value = false
                                 }
@@ -213,6 +216,43 @@ fun ChatInputBox(
                     val canPaste = clipboardText.isNotBlank()
 
                     Column(modifier = Modifier.fillMaxWidth()) {
+                        // Pending vision image indicator
+                        if (state.generationMode == GenerationMode.VISION && state.pendingVisionImageBytes != null) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Visibility,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.size(6.dp))
+                                    Text(
+                                        text = "${state.pendingVisionImageBytes.size / 1024} KB",
+                                        style = Typography.get().labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { viewModel.onClearPendingVisionImage() },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = LlamatikIcons.Close,
+                                        contentDescription = "Remove image",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                }
+                            }
+                        }
+
                         val ragName = state.ragPdfFileName
                         if (ragName != null) {
                             Row(
@@ -291,6 +331,7 @@ fun ChatInputBox(
                                             }
 
                                             GenerationMode.IMAGE -> viewModel.onImagePromptSendDirect(message)
+                                            GenerationMode.VISION -> viewModel.onVisionMessageSend(message)
                                         }
                                         showSuggestions.value = false
                                         keyboardController?.hide()
@@ -391,12 +432,37 @@ fun ChatInputBox(
                                 Spacer(modifier = Modifier.size(6.dp))
                             }
 
+                            if (state.isVlmModelLoaded) {
+                                val hasImage = state.pendingVisionImageBytes != null
+                                IconButton(
+                                    onClick = { viewModel.onPickVisionImage() },
+                                    enabled = !isGenerating && !isTranscribing,
+                                    modifier = Modifier
+                                        .padding(end = 6.dp)
+                                        .size(BUTTON_SIZE.dp)
+                                        .clip(RoundedCornerShape(ROUNDED_CORNER_SIZE.dp))
+                                        .background(
+                                            if (hasImage) MaterialTheme.colorScheme.primaryContainer
+                                            else MaterialTheme.colorScheme.surfaceVariant
+                                        )
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Visibility,
+                                        contentDescription = localization.voiceInput,
+                                        tint = if (hasImage) MaterialTheme.colorScheme.onPrimaryContainer
+                                        else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(modifier = Modifier.size(6.dp))
+                            }
+
                             if (!canSend && !isGenerating && !isTranscribing && state.isSttModelLoaded) {
                                 val micEnabled = !isTranscribing && !isGenerating
                                 IconButton(
                                     onClick = { if (micEnabled) onMicClick() },
                                     enabled = micEnabled,
                                     modifier = Modifier
+                                        .padding(end = 6.dp)
                                         .size(BUTTON_SIZE.dp)
                                         .clip(RoundedCornerShape(ROUNDED_CORNER_SIZE.dp))
                                         .background(
@@ -415,6 +481,7 @@ fun ChatInputBox(
                                         }
                                     )
                                 }
+                                Spacer(modifier = Modifier.size(6.dp))
                             }
 
                             if (isGenerating) {
@@ -432,7 +499,9 @@ fun ChatInputBox(
                                     )
                                 }
                             } else {
-                                if (canSend) {
+                                val visionCanSend = state.generationMode == GenerationMode.VISION &&
+                                        state.pendingVisionImageBytes != null
+                                if (canSend || visionCanSend) {
                                     IconButton(
                                         onClick = {
                                             val message = input.text.trim()
@@ -449,23 +518,24 @@ fun ChatInputBox(
                                                 }
 
                                                 GenerationMode.IMAGE -> viewModel.onImagePromptSendDirect(message)
+                                                GenerationMode.VISION -> viewModel.onVisionMessageSend(message)
                                             }
                                             showSuggestions.value = false
                                             keyboardController?.hide()
                                         },
-                                        enabled = canSend,
+                                        enabled = canSend || visionCanSend,
                                         modifier = Modifier
                                             .size(BUTTON_SIZE.dp)
                                             .clip(RoundedCornerShape(ROUNDED_CORNER_SIZE.dp))
                                             .background(
-                                                if (canSend) MaterialTheme.colorScheme.primary
+                                                if (canSend || visionCanSend) MaterialTheme.colorScheme.primary
                                                 else MaterialTheme.colorScheme.surfaceVariant
                                             )
                                     ) {
                                         Icon(
                                             imageVector = LlamatikIcons.Send,
                                             contentDescription = localization.send,
-                                            tint = if (canSend) MaterialTheme.colorScheme.onPrimary
+                                            tint = if (canSend || visionCanSend) MaterialTheme.colorScheme.onPrimary
                                             else MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
