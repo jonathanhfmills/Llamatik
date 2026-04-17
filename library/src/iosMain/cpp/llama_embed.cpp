@@ -62,6 +62,11 @@ static std::atomic<int>   g_max_tokens{256};
 static std::atomic<float> g_top_p{0.95f};
 static std::atomic<int>   g_top_k{40};
 static std::atomic<float> g_repeat_penalty{1.10f};
+static std::atomic<int>   g_context_length{8192};
+static std::atomic<int>   g_num_threads{4};
+static std::atomic<bool>  g_use_mmap{true};
+static std::atomic<bool>  g_flash_attention{false};
+static std::atomic<int>   g_batch_size{512};
 
 // Session / KV bookkeeping
 static std::vector<llama_token> gen_session_tokens;
@@ -710,8 +715,12 @@ bool llama_generate_init(const char *model_path) {
 
     llama_context_params ctx_params = llama_context_default_params();
     ctx_params.embeddings = false;
-    ctx_params.n_ctx      = 8192;
-
+    ctx_params.n_ctx      = (uint32_t)g_context_length.load(std::memory_order_relaxed);
+    ctx_params.n_threads  = g_num_threads.load(std::memory_order_relaxed);
+    ctx_params.n_batch    = (uint32_t)g_batch_size.load(std::memory_order_relaxed);
+    ctx_params.flash_attn_type = g_flash_attention.load(std::memory_order_relaxed)
+        ? LLAMA_FLASH_ATTN_TYPE_ENABLED
+        : LLAMA_FLASH_ATTN_TYPE_AUTO;
     gen_ctx = llama_init_from_model(gen_model, ctx_params);
     if (!gen_ctx) {
         llama_model_free(gen_model);
@@ -720,7 +729,9 @@ bool llama_generate_init(const char *model_path) {
     }
 
     session_clear_state_only();
-    DBG("generate: n_ctx = %u", (unsigned)llama_n_ctx(gen_ctx));
+    DBG("generate: n_ctx=%u threads=%d",
+        (unsigned)llama_n_ctx(gen_ctx),
+        ctx_params.n_threads);
     return true;
 }
 
@@ -1364,12 +1375,22 @@ void llama_generate_set_params(float temperature,
         int max_tokens,
         float top_p,
         int top_k,
-        float repeat_penalty) {
+        float repeat_penalty,
+        int context_length,
+        int num_threads,
+        bool use_mmap,
+        bool flash_attention,
+        int batch_size) {
     g_temperature.store(temperature, std::memory_order_relaxed);
     g_max_tokens.store(max_tokens, std::memory_order_relaxed);
     g_top_p.store(top_p, std::memory_order_relaxed);
     g_top_k.store(top_k, std::memory_order_relaxed);
     g_repeat_penalty.store(repeat_penalty, std::memory_order_relaxed);
+    g_context_length.store(context_length, std::memory_order_relaxed);
+    g_num_threads.store(num_threads, std::memory_order_relaxed);
+    g_use_mmap.store(use_mmap, std::memory_order_relaxed);
+    g_flash_attention.store(flash_attention, std::memory_order_relaxed);
+    g_batch_size.store(batch_size, std::memory_order_relaxed);
 }
 
 // ===================== KV session support =====================

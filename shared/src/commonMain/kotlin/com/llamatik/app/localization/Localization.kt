@@ -104,6 +104,11 @@ interface Localization {
     val topP: String
     val topK: String
     val repeatPenalty: String
+    val contextLength: String
+    val numThreads: String
+    val useMmap: String
+    val flashAttention: String
+    val batchSize: String
     val apply: String
 
     val defaultSystemPrompt: String

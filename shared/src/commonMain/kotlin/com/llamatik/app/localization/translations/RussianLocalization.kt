@@ -113,6 +113,11 @@ internal object RussianLocalization : Localization {
     override val topP = "Top P"
     override val topK = "Top K"
     override val repeatPenalty = "Штраф за повторение"
+    override val contextLength = "Длина контекста"
+    override val numThreads = "Потоки"
+    override val useMmap = "Отображение памяти (mmap)"
+    override val flashAttention = "Flash Attention"
+    override val batchSize = "Размер пакета"
     override val apply = "Применить"
     override val downloadFinished = "Загрузка завершена"
 

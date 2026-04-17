@@ -115,6 +115,11 @@ internal object DeutschLocalization : Localization {
     override val topP = "Top P"
     override val topK = "Top K"
     override val repeatPenalty = "Wiederholungsstrafe"
+    override val contextLength = "Kontextlänge"
+    override val numThreads = "Threads"
+    override val useMmap = "Speicher-Mapping (mmap)"
+    override val flashAttention = "Flash Attention"
+    override val batchSize = "Batch-Größe"
     override val apply = "Anwenden"
     override val downloadFinished = "Download abgeschlossen"
 
