@@ -658,9 +658,17 @@ class ChatBotViewModel(
     fun onVlmModelSelected(model: LlamaModel) {
         screenModelScope.launch(AppDispatchersIO) {
             val path = resolveAndMigratePath(model) ?: return@launch
-            val mmprojPath = resolveAndMigrateMmprojPath(model) ?: run {
-                Logger.e { "LlamaVM - no mmproj path for VLM model ${model.name}" }
-                _sideEffects.trySend(ChatBotSideEffects.OnVlmModelLoadError)
+            val mmprojPath = resolveAndMigrateMmprojPath(model)
+            if (mmprojPath == null) {
+                // mmproj not downloaded yet — start the download if there's a URL
+                val mmprojUrl = model.mmprojUrl
+                if (mmprojUrl != null) {
+                    Logger.d { "LlamaVM - mmproj not available for ${model.name}, triggering download" }
+                    downloadMmprojIfNeeded(model, mmprojUrl, path)
+                } else {
+                    Logger.e { "LlamaVM - no mmproj path for VLM model ${model.name}" }
+                    _sideEffects.trySend(ChatBotSideEffects.OnVlmModelLoadError)
+                }
                 return@launch
             }
 
