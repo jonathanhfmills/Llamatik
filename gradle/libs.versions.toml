@@ -1,6 +1,6 @@
 [versions]
 android-compileSdk = "36"
-android-minSdk = "26"
+android-minSdk = "28"
 android-targetSdk = "36"
 koalaplotCore = "0.9.1"
 kotlin = "2.2.21"
