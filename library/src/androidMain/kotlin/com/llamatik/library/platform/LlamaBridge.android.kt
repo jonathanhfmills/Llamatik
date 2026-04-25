@@ -13,6 +13,8 @@ actual object LlamaBridge {
 
     actual external fun initGenerateModel(modelPath: String): Boolean
     actual external fun generate(prompt: String): String
+    // generateRaw: parameterized path (respects updateGenerateParams), no grammar constraint
+    external fun generateRaw(prompt: String): String
     actual external fun generateWithContext(systemPrompt: String, contextBlock: String, userPrompt: String): String
     actual external fun generateJson(prompt: String, jsonSchema: String?): String
 

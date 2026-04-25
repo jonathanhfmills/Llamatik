@@ -459,12 +459,11 @@ Java_com_llamatik_library_platform_LlamaBridge_initGenerateModel(JNIEnv *env, jo
         return JNI_FALSE;
     }
 
-    bool helper_ok = llama_generate_init(path);
-    if (!helper_ok) {
-        LOGE("initGenerateModel: llama_generate_init failed");
-        env->ReleaseStringUTFChars(modelPath, path);
-        return JNI_FALSE;
-    }
+    // llama_generate_init() (llama_embed.cpp) is intentionally skipped here.
+    // It would load the model a second time into a separate static gen_ctx with hardcoded
+    // n_ctx=8192 and hard_cap=2048 — doubling RAM usage and ignoring updateGenerateParams.
+    // We use generate_with_optional_grammar() (via generateJson) instead, which uses
+    // the context created below and respects all g_* atomic params.
 
     if (!g_backend_inited) {
         llama_backend_init();
@@ -604,6 +603,23 @@ static std::string generate_with_optional_grammar(const char *prompt, const char
         return sanitize_generation(output);
     }
     return trim(output);
+}
+
+// generateRaw: calls generate_with_optional_grammar without grammar constraint.
+// Respects all updateGenerateParams (n_ctx, max_tokens, temperature, etc.).
+// Use instead of generate() which routes through llama_embed.cpp's hardcoded path.
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_llamatik_library_platform_LlamaBridge_generateRaw(JNIEnv *env, jobject, jstring input) {
+    if (!input) {
+        LOGE("generateRaw: input null");
+        return env->NewStringUTF("");
+    }
+    const char *prompt = env->GetStringUTFChars(input, nullptr);
+    if (!prompt) return env->NewStringUTF("");
+    std::string out = generate_with_optional_grammar(prompt, "", /*sanitize=*/false);
+    env->ReleaseStringUTFChars(input, prompt);
+    return env->NewStringUTF(out.c_str());
 }
 
 extern "C"
