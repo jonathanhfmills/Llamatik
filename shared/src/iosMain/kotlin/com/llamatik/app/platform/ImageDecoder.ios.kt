@@ -10,6 +10,14 @@ import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.usePinned
 import org.jetbrains.skia.Image
+import platform.CoreGraphics.CGBitmapContextCreate
+import platform.CoreGraphics.CGColorSpaceCreateDeviceRGB
+import platform.CoreGraphics.CGColorSpaceRelease
+import platform.CoreGraphics.CGContextDrawImage
+import platform.CoreGraphics.CGContextRelease
+import platform.CoreGraphics.CGImageGetHeight
+import platform.CoreGraphics.CGImageGetWidth
+import platform.CoreGraphics.CGRectMake
 import platform.Foundation.NSData
 import platform.Foundation.NSTemporaryDirectory
 import platform.Foundation.create
@@ -50,6 +58,39 @@ actual fun normalizeToJpegBytes(bytes: ByteArray): ByteArray {
         }
     } catch (_: Throwable) {
         bytes
+    }
+}
+
+actual fun decodeImageBytesToRgba(bytes: ByteArray): Triple<ByteArray, Int, Int>? {
+    if (bytes.isEmpty()) return null
+    return try {
+        val nsData = bytes.usePinned { pinned ->
+            NSData.create(bytes = pinned.addressOf(0), length = bytes.size.toULong())
+        }
+        val uiImage = UIImage(data = nsData) ?: return null
+        val cgImage = uiImage.CGImage ?: return null
+        val w = CGImageGetWidth(cgImage).toInt()
+        val h = CGImageGetHeight(cgImage).toInt()
+        val byteCount = w * h * 4
+        val rgba = ByteArray(byteCount)
+        rgba.usePinned { pinned ->
+            val colorSpace = CGColorSpaceCreateDeviceRGB()
+            val ctx = CGBitmapContextCreate(
+                data = pinned.addressOf(0),
+                width = w.toULong(),
+                height = h.toULong(),
+                bitsPerComponent = 8u,
+                bytesPerRow = (w * 4).toULong(),
+                space = colorSpace,
+                bitmapInfo = 0u,  // RGBA, unpremultiplied
+            )
+            CGContextDrawImage(ctx, CGRectMake(0.0, 0.0, w.toDouble(), h.toDouble()), cgImage)
+            CGContextRelease(ctx)
+            CGColorSpaceRelease(colorSpace)
+        }
+        Triple(rgba, w, h)
+    } catch (_: Throwable) {
+        null
     }
 }
 

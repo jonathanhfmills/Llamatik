@@ -63,6 +63,32 @@ expect object LlamaBridge {
      */
     fun generateContinue(prompt: String): String
 
+    /**
+     * Returns the value of the "general.finetune" GGUF metadata key, or null if absent.
+     * Typical values: "instruct", "chat". A value of "base" (or null) indicates a base model
+     * that is not instruction-tuned and may produce poor results in chat/tool-call pipelines.
+     */
+    fun getModelFinetuneType(): String?
+
+    /**
+     * Returns the chat template string embedded in the loaded GGUF model, or null if unavailable.
+     */
+    fun getModelChatTemplate(): String?
+
+    /**
+     * Renders [messages] (list of role to content pairs) into a prompt string using the model's
+     * own embedded chat template. Pass [addAssistantPrefix] = true when starting a new generation.
+     * Returns null if the model is not loaded or the template is unavailable.
+     */
+    fun applyChatTemplate(messages: List<Pair<String, String>>, addAssistantPrefix: Boolean): String?
+
+    /**
+     * Create a new independent inference session backed by the already-loaded generate model.
+     * Returns null if the model is not yet loaded.
+     * Each session has its own KV cache, so multiple sessions may run concurrently.
+     */
+    fun createSession(): LlamaSession?
+
     fun shutdown()
 
     fun nativeCancelGenerate()

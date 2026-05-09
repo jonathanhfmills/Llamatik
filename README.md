@@ -61,6 +61,9 @@ Designed for **privacy-first**, **offline-capable**, and **cross-platform** AI a
 - ✅ Embeddings for vector search & RAG
 - ✅ Configurable context length, threads, mmap, Flash Attention
 - ✅ KV cache session save / load / continue
+- ✅ **Concurrent sessions** — run multiple independent inference contexts simultaneously via `LlamaSession`
+- ✅ Model metadata introspection (`getModelFinetuneType` — detect base vs instruction-tuned)
+- ✅ Chat template introspection and rendering (`getModelChatTemplate` / `applyChatTemplate`)
 - ✅ Fine-grained sampling controls (temperature, top-k, top-p, repeat penalty, max tokens)
 
 ### 🎙 Speech-to-Text (whisper.cpp)
@@ -168,7 +171,7 @@ dependencyResolutionManagement {
 }
 
 commonMain.dependencies {
-    implementation("com.llamatik:library:1.0.0")
+    implementation("com.llamatik:library:1.3.0")
 }
 ```
 
@@ -269,11 +272,24 @@ expect object LlamaBridge {
         callback: GenStream
     )
 
+    // Model metadata
+    fun getModelFinetuneType(): String?               // "general.finetune" GGUF key — e.g. "instruct", "chat"; null means base model
+
+    // Chat template support
+    fun getModelChatTemplate(): String?               // returns the chat template embedded in the loaded GGUF, or null
+    fun applyChatTemplate(
+        messages: List<Pair<String, String>>,         // list of (role, content) pairs
+        addAssistantPrefix: Boolean                   // true to append the assistant turn prefix
+    ): String?                                        // rendered prompt string, or null if model/template unavailable
+
     // KV cache session support
     fun sessionReset(): Boolean                       // clear KV state, keep model loaded
     fun sessionSave(path: String): Boolean            // persist KV state to file
     fun sessionLoad(path: String): Boolean            // restore KV state from file
     fun generateContinue(prompt: String): String      // generate using existing KV cache
+
+    // Concurrent sessions — each session owns an isolated KV cache; model weights are shared
+    fun createSession(): LlamaSession?                // null on WASM (not supported)
 
     // Generation parameters (applied on next generate call)
     fun updateGenerateParams(
@@ -296,6 +312,13 @@ interface GenStream {
     fun onDelta(text: String)
     fun onComplete()
     fun onError(message: String)
+}
+
+// Concurrent session handle — created via LlamaBridge.createSession()
+expect class LlamaSession {
+    fun stream(prompt: String, callback: GenStream)  // run inference in this session's context
+    fun cancel()                                     // cancel the in-progress stream
+    fun close()                                      // release native KV cache resources
 }
 ```
 
@@ -336,6 +359,82 @@ val continuation = LlamaBridge.generateContinue("What about multiplatform suppor
 // Reset state without unloading the model
 LlamaBridge.sessionReset()
 ```
+
+### Concurrent Sessions
+
+`LlamaBridge.createSession()` returns a `LlamaSession` handle that owns an **isolated KV cache context**. The model weights (`gen_model`) are shared across all sessions, so loading the model once is sufficient regardless of how many sessions you create. Each session can run inference independently and concurrently on any thread.
+
+```kotlin
+// Load the model once
+LlamaBridge.initGenerateModel(modelPath)
+
+// Create two independent sessions
+val sessionA = LlamaBridge.createSession() ?: error("Session creation failed")
+val sessionB = LlamaBridge.createSession() ?: error("Session creation failed")
+
+// Run them concurrently (e.g. launch in separate coroutines)
+launch { sessionA.stream("Tell me about Kotlin.", callback = agentACallback) }
+launch { sessionB.stream("Explain coroutines.", callback = agentBCallback) }
+
+// Cancel an in-progress session
+sessionA.cancel()
+
+// Always close sessions when done to free native KV cache memory
+sessionA.close()
+sessionB.close()
+```
+
+`createSession()` returns `null` on WASM (concurrent sessions are not supported in the single-threaded WebAssembly environment — use `LlamaBridge.generateStream()` there instead).
+
+### Model Metadata
+
+`getModelFinetuneType()` reads the `general.finetune` key from the loaded GGUF's metadata. Use it after `initGenerateModel` to check whether the model is instruction-tuned before sending it chat-style prompts or tool-call XML.
+
+| Return value | Meaning |
+|---|---|
+| `"instruct"` / `"chat"` | Instruction-tuned — suitable for chat, tool calls, structured output |
+| `"base"` | Base model — will complete text but does not reliably follow instructions |
+| `null` | Key absent in the GGUF — treat as base model |
+
+```kotlin
+LlamaBridge.initGenerateModel(modelPath)
+
+when (LlamaBridge.getModelFinetuneType()?.lowercase()) {
+    "instruct", "chat" -> { /* proceed normally */ }
+    else -> showWarning("This appears to be a base model. For best results, use an instruction-tuned model.")
+}
+```
+
+### Chat Templates
+
+Most modern GGUF models ship with an embedded chat template (a Jinja-style string that describes how to format conversation turns for that model family). The two template helpers give you direct access to it:
+
+| Method | Description |
+|---|---|
+| `getModelChatTemplate()` | Returns the raw template string from the loaded model, or `null` if the model is not loaded or has no embedded template. |
+| `applyChatTemplate(messages, addAssistantPrefix)` | Renders a list of `(role, content)` pairs into a single prompt string using the model's own template. Pass `addAssistantPrefix = true` when you want the model to begin generating the next assistant turn. Returns `null` when the model is not loaded. |
+
+```kotlin
+// Build a multi-turn conversation prompt using the model's own template
+val prompt = LlamaBridge.applyChatTemplate(
+    messages = listOf(
+        "system" to "You are a helpful assistant.",
+        "user"   to "What is Kotlin Multiplatform?",
+    ),
+    addAssistantPrefix = true          // appends the assistant-turn prefix so the model starts generating
+)
+
+if (prompt != null) {
+    val response = LlamaBridge.generate(prompt)
+    println(response)
+}
+
+// Inspect the raw template if needed (e.g. for debugging or custom rendering)
+val templateString = LlamaBridge.getModelChatTemplate()
+println(templateString)
+```
+
+**Note**: `applyChatTemplate` relies on the template embedded in the GGUF file, which is model-specific. If the model has no embedded template (older GGUF files), both helpers return `null` and you should format the prompt manually.
 
 ### Speech-to-Text (WhisperBridge)
 

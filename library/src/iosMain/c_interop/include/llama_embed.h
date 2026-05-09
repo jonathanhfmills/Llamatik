@@ -4,8 +4,9 @@
 #ifdef __cplusplus
 extern "C" {
 #else
-// When compiling as C / Obj-C, make sure 'bool' exists
+// When compiling as C / Obj-C, make sure 'bool' and fixed-width types exist
   #include <stdbool.h>   // C99 'bool', 'true', 'false'
+  #include <stdint.h>    // int64_t
 #endif
 
 // ================= Embeddings =================
@@ -185,6 +186,67 @@ bool llama_generate_session_load(const char *path_session);
 
 /** Continues using existing KV cache; returns malloc string. */
 char *llama_generate_continue(const char *prompt);
+
+// ===================== Chat template =====================
+
+/**
+ * Returns the chat template string embedded in the loaded GGUF model.
+ * The returned pointer is owned by the model — do not free it.
+ * Returns NULL if the model is not loaded or has no embedded template.
+ */
+const char *llama_get_model_chat_template(void);
+
+/**
+ * Returns the value of the "general.finetune" GGUF metadata key.
+ * Typical values: "instruct", "chat", "base" (or absent for base models).
+ * Returns a newly malloc'd string the caller must free(), or NULL if the model
+ * is not loaded or the key is absent.
+ */
+char *llama_get_model_finetune_type(void);
+
+/**
+ * Renders messages into a prompt string using the model's embedded chat template.
+ * roles and contents are parallel arrays of length n_messages.
+ * add_assistant_prefix: append the assistant turn opener at the end.
+ * Returns a newly malloc'd string the caller must free(), or NULL on error.
+ */
+char *llama_apply_chat_template(
+    const char **roles,
+    const char **contents,
+    int n_messages,
+    bool add_assistant_prefix);
+
+// ===================== Concurrent session API =====================
+
+/**
+ * Create an independent inference session sharing the already-loaded generate model.
+ * Returns a positive int64 handle on success, or -1 on failure.
+ * Each session has its own KV cache and cancel flag so multiple sessions may run
+ * concurrently on separate threads.
+ */
+int64_t llama_session_create(void);
+
+/**
+ * Release all resources for the given session handle.
+ * Calling this while llama_session_stream() is active on the handle is undefined.
+ */
+void llama_session_close(int64_t handle);
+
+/**
+ * Stream generation for the given session handle.
+ * Semantics are identical to llama_generate_stream() but isolated to this session.
+ */
+void llama_session_stream(int64_t handle,
+        const char *prompt,
+        llm_on_delta on_delta,
+        llm_on_done on_done,
+        llm_on_error on_error,
+        void *user);
+
+/**
+ * Request cancellation of an in-progress llama_session_stream() for this handle.
+ */
+void llama_session_cancel(int64_t handle);
 
 #ifdef __cplusplus
 } // extern "C"

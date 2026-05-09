@@ -136,6 +136,42 @@ actual object LlamaBridge {
         nativeGenerateWithContextStream(system, context, user, cb)
     }
 
+    actual external fun getModelFinetuneType(): String?
+    actual external fun getModelChatTemplate(): String?
+
+    private external fun nativeApplyChatTemplate(
+        template: String?,
+        roles: Array<String>,
+        contents: Array<String>,
+        addAssistantPrefix: Boolean,
+    ): String?
+
+    actual fun applyChatTemplate(messages: List<Pair<String, String>>, addAssistantPrefix: Boolean): String? {
+        val roles = messages.map { it.first }.toTypedArray()
+        val contents = messages.map { it.second }.toTypedArray()
+        return nativeApplyChatTemplate(getModelChatTemplate(), roles, contents, addAssistantPrefix)
+    }
+
+    // ===================== Concurrent sessions (JNI) =====================
+    // private so the JVM method name has no $module suffix that would break JNI lookup.
+    private external fun nativeCreateSession(): Long
+    private external fun nativeCloseSession(handle: Long)
+    private external fun nativeSessionStream(handle: Long, prompt: String, callback: GenStream)
+    private external fun nativeSessionCancel(handle: Long)
+
+    // Non-external wrappers so LlamaSession (same module) can call these via internal visibility
+    // without triggering JNI name mangling.
+    internal fun sessionStreamBridge(handle: Long, prompt: String, callback: GenStream) =
+        nativeSessionStream(handle, prompt, callback)
+    internal fun sessionCancelBridge(handle: Long) = nativeSessionCancel(handle)
+    internal fun sessionCloseBridge(handle: Long) = nativeCloseSession(handle)
+
+    actual fun createSession(): LlamaSession? {
+        val handle = nativeCreateSession()
+        if (handle < 0L) return null
+        return LlamaSession(handle)
+    }
+
     actual external fun shutdown()
     actual external fun nativeCancelGenerate()
 }
